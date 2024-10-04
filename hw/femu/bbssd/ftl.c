@@ -907,17 +907,17 @@ static void *ftl_thread(void *arg)
         usleep(100000);
     }
 
-    ssd->to_ftl = n->to_ftl;       // submission queue의 더블 포인터
-    ssd->to_poller = n->to_poller; // completion queue의 더블 포인터
+    ssd->to_ftl = n->to_ftl;
+    ssd->to_poller = n->to_poller;
 
     while (1) // 무한 루프
     {
         for (i = 1; i <= n->nr_pollers; i++) // 폴러 개수만큼 반복
         {
-            if (!ssd->to_ftl[i] || !femu_ring_count(ssd->to_ftl[i])) // submission queue가 없거나 비어있으면 continue
+            if (!ssd->to_ftl[i] || !femu_ring_count(ssd->to_ftl[i])) // to_ftl 큐가 없거나 비어있으면 continue
                 continue;
 
-            rc = femu_ring_dequeue(ssd->to_ftl[i], (void *)&req, 1); // submission queue에서 요청 1개 꺼냄
+            rc = femu_ring_dequeue(ssd->to_ftl[i], (void *)&req, 1); // to_ftl 큐에서 요청을 꺼냄
             if (rc != 1)
             {
                 printf("FEMU: FTL to_ftl dequeue failed\n");
@@ -943,7 +943,7 @@ static void *ftl_thread(void *arg)
             req->reqlat = lat;       // 지연시간 세팅
             req->expire_time += lat; // 만료 시간 갱신
 
-            rc = femu_ring_enqueue(ssd->to_poller[i], (void *)&req, 1); // 처리된 요청을 completion queue에 넣음
+            rc = femu_ring_enqueue(ssd->to_poller[i], (void *)&req, 1); // 처리된 요청을 to_poller 큐에 넣음
             if (rc != 1)
             {
                 ftl_err("FTL to_poller enqueue failed\n");

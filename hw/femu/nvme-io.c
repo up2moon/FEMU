@@ -55,15 +55,15 @@ static void nvme_process_sq_io(void *opaque, int index_poller)
         if (sq->phys_contig)
         {
             addr = sq->dma_addr + sq->head * n->sqe_size;
-            nvme_copy_cmd(&cmd, (void *)&(((NvmeCmd *)sq->dma_addr_hva)[sq->head]));
+            nvme_copy_cmd(&cmd, (void *)&(((NvmeCmd *)sq->dma_addr_hva)[sq->head])); // submission queue에서 명령을 읽어옴
         }
         else
         {
             addr = nvme_discontig(sq->prp_list, sq->head, n->page_size,
                                   n->sqe_size);
-            nvme_addr_read(n, addr, (void *)&cmd, sizeof(cmd));
+            nvme_addr_read(n, addr, (void *)&cmd, sizeof(cmd)); // submission queue에서 명령을 읽어옴
         }
-        nvme_inc_sq_head(sq);
+        nvme_inc_sq_head(sq); // 다음에 처리할 명령을 위해 head를 증가시킴
 
         req = QTAILQ_FIRST(&sq->req_list);
         QTAILQ_REMOVE(&sq->req_list, req, entry);
@@ -84,7 +84,7 @@ static void nvme_process_sq_io(void *opaque, int index_poller)
         {
             req->status = status;
 
-            int rc = femu_ring_enqueue(n->to_ftl[index_poller], (void *)&req, 1); // submission queue에 요청을 넣음
+            int rc = femu_ring_enqueue(n->to_ftl[index_poller], (void *)&req, 1); // to_ftl 큐에 요청을 넣음
             if (rc != 1)
             {
                 femu_err("enqueue failed, ret=%d\n", rc);
@@ -151,13 +151,13 @@ static void nvme_process_cq_cpl(void *arg, int index_poller)
 
     if (BBSSD(n) || ZNSSD(n))
     {
-        rp = n->to_poller[index_poller]; // completion queue
+        rp = n->to_poller[index_poller];
     }
 
-    while (femu_ring_count(rp)) // completion queue가 비어있지 않은 동안 반복
+    while (femu_ring_count(rp)) // to_poller 큐가 비어있지 않은 동안 반복
     {
         req = NULL;
-        rc = femu_ring_dequeue(rp, (void *)&req, 1); // completion queue에서 요청 1개 꺼냄
+        rc = femu_ring_dequeue(rp, (void *)&req, 1); // to_poller 큐에서 요청을 꺼냄
         if (rc != 1)
         {
             femu_err("dequeue from to_poller request failed\n");
@@ -225,8 +225,8 @@ void *nvme_poller(void *arg)
 
     switch (n->multipoller_enabled)
     {
-    case 1: // 다중 폴러 활성화
-        while (1)
+    case 1:       // 다중 폴러 활성화
+        while (1) // 무한 루프
         {
             if ((!n->dataplane_started))
             {
@@ -243,8 +243,8 @@ void *nvme_poller(void *arg)
             nvme_process_cq_cpl(n, index); // completion queue 처리
         }
         break;
-    default: // 다중 폴러 비활성화
-        while (1)
+    default:      // 다중 폴러 비활성화
+        while (1) // 무한 루프
         {
             if ((!n->dataplane_started))
             {
