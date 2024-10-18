@@ -49,7 +49,7 @@ static void nvme_process_sq_io(void *opaque, int index_poller)
     NvmeRequest *req;
     int processed = 0;
 
-    nvme_update_sq_tail(sq);
+    nvme_update_sq_tail(sq);     // tail을 최신화
     while (!(nvme_sq_empty(sq))) // submission queue가 빌 때까지 반복
     {
         if (sq->phys_contig)
@@ -79,7 +79,7 @@ static void nvme_process_sq_io(void *opaque, int index_poller)
             femu_debug("%s,cid:%d\n", __func__, cmd.cid);
         }
 
-        status = nvme_io_cmd(n, &cmd, req);
+        status = nvme_io_cmd(n, &cmd, req); // 실제 I/O 처리
         if (1 && status == NVME_SUCCESS)
         {
             req->status = status;
@@ -103,7 +103,7 @@ static void nvme_process_sq_io(void *opaque, int index_poller)
         processed++;
     }
 
-    nvme_update_sq_eventidx(sq);
+    nvme_update_sq_eventidx(sq); // sq의 eventidx를 최신화
     sq->completed += processed;
 }
 
@@ -164,13 +164,13 @@ static void nvme_process_cq_cpl(void *arg, int index_poller)
         }
         assert(req);
 
-        pqueue_insert(pq, req); // 우선순위 큐에 요청을 넣음
+        pqueue_insert(pq, req); // 우선순위 큐에 요청을 넣음(우선순위는 expire_time)
     }
 
-    while ((req = pqueue_peek(pq)))
+    while ((req = pqueue_peek(pq))) // expire_time이 가장 빠른 요청을 가져옴
     {
         now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
-        if (now < req->expire_time)
+        if (now < req->expire_time) // expire_time이 아직 안 지났으면 break
         {
             break;
         }
@@ -178,12 +178,12 @@ static void nvme_process_cq_cpl(void *arg, int index_poller)
         cq = n->cq[req->sq->sqid];
         if (!cq->is_active)
             continue;
-        nvme_post_cqe(cq, req);
+        nvme_post_cqe(cq, req); // cq에 요청을 넣음
         QTAILQ_INSERT_TAIL(&req->sq->req_list, req, entry);
-        pqueue_pop(pq);
+        pqueue_pop(pq); // 처리한 요청 제거
         processed++;
         n->nr_tt_ios++;
-        if (now - req->expire_time >= 20000)
+        if (now - req->expire_time >= 20000) // 20us 이상 지연된 요청이면
         {
             n->nr_tt_late_ios++;
             if (n->print_log)
@@ -209,7 +209,7 @@ static void nvme_process_cq_cpl(void *arg, int index_poller)
         {
             if (n->should_isr[i])
             {
-                nvme_isr_notify_io(n->cq[i]);
+                nvme_isr_notify_io(n->cq[i]); // I/O 완료 인터럽트 발생
                 n->should_isr[i] = false;
             }
         }
@@ -225,8 +225,8 @@ void *nvme_poller(void *arg)
 
     switch (n->multipoller_enabled)
     {
-    case 1:       // 다중 폴러 활성화
-        while (1) // 무한 루프
+    case 1:
+        while (1)
         {
             if ((!n->dataplane_started))
             {
@@ -234,17 +234,17 @@ void *nvme_poller(void *arg)
                 continue;
             }
 
-            NvmeSQueue *sq = n->sq[index]; // submission queue
-            NvmeCQueue *cq = n->cq[index]; // completion queue
+            NvmeSQueue *sq = n->sq[index];
+            NvmeCQueue *cq = n->cq[index];
             if (sq && sq->is_active && cq && cq->is_active)
             {
-                nvme_process_sq_io(sq, index); // submission queue 처리
+                nvme_process_sq_io(sq, index);
             }
-            nvme_process_cq_cpl(n, index); // completion queue 처리
+            nvme_process_cq_cpl(n, index);
         }
         break;
-    default:      // 다중 폴러 비활성화
-        while (1) // 무한 루프
+    default: // 다중 폴러 비활성화
+        while (1)
         {
             if ((!n->dataplane_started))
             {
@@ -254,8 +254,8 @@ void *nvme_poller(void *arg)
 
             for (i = 1; i <= n->nr_io_queues; i++) // 큐 개수만큼 반복
             {
-                NvmeSQueue *sq = n->sq[i]; // submission queue
-                NvmeCQueue *cq = n->cq[i]; // completion queue
+                NvmeSQueue *sq = n->sq[i];
+                NvmeCQueue *cq = n->cq[i];
                 if (sq && sq->is_active && cq && cq->is_active)
                 {
                     nvme_process_sq_io(sq, index); // submission queue 처리

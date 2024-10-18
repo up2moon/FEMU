@@ -927,10 +927,10 @@ static void *ftl_thread(void *arg)
             switch (req->cmd.opcode) // opcode별로 처리
             {
             case NVME_CMD_WRITE:
-                lat = ssd_write(ssd, req);
+                lat = ssd_write(ssd, req); // write 요청 에뮬레이션
                 break;
             case NVME_CMD_READ:
-                lat = ssd_read(ssd, req);
+                lat = ssd_read(ssd, req); // read 요청 에뮬레이션
                 break;
             case NVME_CMD_DSM:
                 lat = 0;
