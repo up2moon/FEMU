@@ -7,28 +7,28 @@ extern uint64_t pages_moved;
 
 static void *ftl_thread(void *arg);
 
-static inline bool should_gc(struct ssd *ssd) // 빈 라인의 개수가 임계값보다 작은지 확인
+static inline bool should_gc(struct ssd *ssd)
 {
-    return (ssd->lm.free_line_cnt <= ssd->sp.gc_thres_lines);
+    return (ssd->lm.free_line_cnt <= ssd->sp.gc_thres_lines); // Checks if the number of free lines is less than or equal to the GC threshold
 }
 
-static inline bool should_gc_high(struct ssd *ssd) // 빈 라인의 개수가 높은 임계값보다 작은지 확인
+static inline bool should_gc_high(struct ssd *ssd)
 {
-    return (ssd->lm.free_line_cnt <= ssd->sp.gc_thres_lines_high);
+    return (ssd->lm.free_line_cnt <= ssd->sp.gc_thres_lines_high); // Checks if the number of free lines is less than or equal to the high GC threshold
 }
 
-static inline struct ppa get_maptbl_ent(struct ssd *ssd, uint64_t lpn) // 매핑 테이블에서 lpn에 해당하는 ppa를 반환
+static inline struct ppa get_maptbl_ent(struct ssd *ssd, uint64_t lpn)
 {
-    return ssd->maptbl[lpn];
+    return ssd->maptbl[lpn]; // Returns the PPA for the specified LPN from the mapping table
 }
 
-static inline void set_maptbl_ent(struct ssd *ssd, uint64_t lpn, struct ppa *ppa) // 매핑 테이블에서 lpn에 해당하는 ppa를 설정
+static inline void set_maptbl_ent(struct ssd *ssd, uint64_t lpn, struct ppa *ppa)
 {
     ftl_assert(lpn < ssd->sp.tt_pgs);
-    ssd->maptbl[lpn] = *ppa;
+    ssd->maptbl[lpn] = *ppa; // Sets the PPA in the mapping table for the given LPN
 }
 
-static uint64_t ppa2pgidx(struct ssd *ssd, struct ppa *ppa) // ppa를 페이지 인덱스로 변환
+static uint64_t ppa2pgidx(struct ssd *ssd, struct ppa *ppa)
 {
     struct ssdparams *spp = &ssd->sp;
     uint64_t pgidx;
@@ -44,7 +44,7 @@ static uint64_t ppa2pgidx(struct ssd *ssd, struct ppa *ppa) // ppa를 페이지 
     return pgidx;
 }
 
-static inline uint64_t get_rmap_ent(struct ssd *ssd, struct ppa *ppa) // rmap에서 ppa에 매핑된 lpn을 반환
+static inline uint64_t get_rmap_ent(struct ssd *ssd, struct ppa *ppa)
 {
     uint64_t pgidx = ppa2pgidx(ssd, ppa);
 
@@ -52,7 +52,7 @@ static inline uint64_t get_rmap_ent(struct ssd *ssd, struct ppa *ppa) // rmap에
 }
 
 /* set rmap[page_no(ppa)] -> lpn */
-static inline void set_rmap_ent(struct ssd *ssd, uint64_t lpn, struct ppa *ppa) // rmap에서 ppa에 매핑된 lpn을 세팅
+static inline void set_rmap_ent(struct ssd *ssd, uint64_t lpn, struct ppa *ppa) // Sets the LPN for the given PPA in the reverse mapping table
 {
     uint64_t pgidx = ppa2pgidx(ssd, ppa);
 
@@ -165,50 +165,50 @@ static void ssd_advance_write_pointer(struct ssd *ssd)
     struct write_pointer *wpp = &ssd->wp;
     struct line_mgmt *lm = &ssd->lm;
 
-    check_addr(wpp->ch, spp->nchs);
-    wpp->ch++;
-    if (wpp->ch == spp->nchs)
+    check_addr(wpp->ch, spp->nchs); // Checks if the channel index is within the valid range
+    wpp->ch++;                      // Increments the channel index
+    if (wpp->ch == spp->nchs)       // If the channel index is equal to the number of channels
     {
-        wpp->ch = 0;
-        check_addr(wpp->lun, spp->luns_per_ch);
-        wpp->lun++;
+        wpp->ch = 0;                            // Resets the channel index
+        check_addr(wpp->lun, spp->luns_per_ch); // Checks if the LUN index is within the valid range
+        wpp->lun++;                             // Increments the LUN index
         /* in this case, we should go to next lun */
-        if (wpp->lun == spp->luns_per_ch)
+        if (wpp->lun == spp->luns_per_ch) // If the LUN index is equal to the number of LUNs per channel
         {
-            wpp->lun = 0;
+            wpp->lun = 0; // Resets the LUN index
             /* go to next page in the block */
-            check_addr(wpp->pg, spp->pgs_per_blk);
-            wpp->pg++;
-            if (wpp->pg == spp->pgs_per_blk)
+            check_addr(wpp->pg, spp->pgs_per_blk); // Checks if the page index is within the valid range
+            wpp->pg++;                             // Increments the page index
+            if (wpp->pg == spp->pgs_per_blk)       // If the page index is equal to the number of pages per block
             {
-                wpp->pg = 0;
+                wpp->pg = 0; // Resets the page index
                 /* move current line to {victim,full} line list */
-                if (wpp->curline->vpc == spp->pgs_per_line)
+                if (wpp->curline->vpc == spp->pgs_per_line) // If the number of valid pages in the current line is equal to the number of pages per line
                 {
                     /* all pgs are still valid, move to full line list */
                     ftl_assert(wpp->curline->ipc == 0);
-                    QTAILQ_INSERT_TAIL(&lm->full_line_list, wpp->curline, entry);
-                    lm->full_line_cnt++;
+                    QTAILQ_INSERT_TAIL(&lm->full_line_list, wpp->curline, entry); // Inserts the current line to the tail of the full line list
+                    lm->full_line_cnt++;                                          // Increments the number of full lines
                 }
                 else
                 {
                     ftl_assert(wpp->curline->vpc >= 0 && wpp->curline->vpc < spp->pgs_per_line);
                     /* there must be some invalid pages in this line */
                     ftl_assert(wpp->curline->ipc > 0);
-                    pqueue_insert(lm->victim_line_pq, wpp->curline);
-                    lm->victim_line_cnt++;
+                    pqueue_insert(lm->victim_line_pq, wpp->curline); // Inserts the current line to the priority queue
+                    lm->victim_line_cnt++;                           // Increments the number of victim lines
                 }
                 /* current line is used up, pick another empty line */
-                check_addr(wpp->blk, spp->blks_per_pl);
+                check_addr(wpp->blk, spp->blks_per_pl); // Checks if the block index is within the valid range
                 wpp->curline = NULL;
-                wpp->curline = get_next_free_line(ssd);
+                wpp->curline = get_next_free_line(ssd); // Gets the next free line
                 if (!wpp->curline)
                 {
                     /* TODO */
                     abort();
                 }
-                wpp->blk = wpp->curline->id;
-                check_addr(wpp->blk, spp->blks_per_pl);
+                wpp->blk = wpp->curline->id;            // Sets the block index to the ID of the current line
+                check_addr(wpp->blk, spp->blks_per_pl); // Checks if the block index is within the valid range
                 /* make sure we are starting from page 0 in the super block */
                 ftl_assert(wpp->pg == 0);
                 ftl_assert(wpp->lun == 0);
@@ -391,7 +391,7 @@ void ssd_init(FemuCtrl *n)
     ssd->ch = g_malloc0(sizeof(struct ssd_channel) * spp->nchs);
     for (int i = 0; i < spp->nchs; i++)
     {
-        ssd_init_ch(&ssd->ch[i], spp); // 채널 초기화
+        ssd_init_ch(&ssd->ch[i], spp);
     }
 
     /* initialize maptbl */
@@ -407,7 +407,7 @@ void ssd_init(FemuCtrl *n)
     ssd_init_write_pointer(ssd);
 
     qemu_thread_create(&ssd->ftl_thread, "FEMU-FTL-Thread", ftl_thread, n,
-                       QEMU_THREAD_JOINABLE); // ftl_thread 생성
+                       QEMU_THREAD_JOINABLE); // Creates ftl_thread
 }
 
 static inline bool valid_ppa(struct ssd *ssd, struct ppa *ppa)
@@ -483,9 +483,9 @@ static uint64_t ssd_advance_status(struct ssd *ssd, struct ppa *ppa, struct nand
     {
     case NAND_READ:
         /* read: perform NAND cmd first */
-        nand_stime = (lun->next_lun_avail_time < cmd_stime) ? cmd_stime : lun->next_lun_avail_time;
-        lun->next_lun_avail_time = nand_stime + spp->pg_rd_lat;
-        lat = lun->next_lun_avail_time - cmd_stime;
+        nand_stime = (lun->next_lun_avail_time < cmd_stime) ? cmd_stime : lun->next_lun_avail_time; // Sets the start time
+        lun->next_lun_avail_time = nand_stime + spp->pg_rd_lat;                                     // Sets the next available time for the LUN
+        lat = lun->next_lun_avail_time - cmd_stime;                                                 // Calculates the latency
 #if 0
         lun->next_lun_avail_time = nand_stime + spp->pg_rd_lat;
 
@@ -500,16 +500,16 @@ static uint64_t ssd_advance_status(struct ssd *ssd, struct ppa *ppa, struct nand
 
     case NAND_WRITE:
         /* write: transfer data through channel first */
-        nand_stime = (lun->next_lun_avail_time < cmd_stime) ? cmd_stime : lun->next_lun_avail_time;
+        nand_stime = (lun->next_lun_avail_time < cmd_stime) ? cmd_stime : lun->next_lun_avail_time; // Sets the start time
         if (ncmd->type == USER_IO)
         {
-            lun->next_lun_avail_time = nand_stime + spp->pg_wr_lat;
+            lun->next_lun_avail_time = nand_stime + spp->pg_wr_lat; // Sets the next available time for the LUN
         }
         else
         {
-            lun->next_lun_avail_time = nand_stime + spp->pg_wr_lat;
+            lun->next_lun_avail_time = nand_stime + spp->pg_wr_lat; // Sets the next available time for the LUN
         }
-        lat = lun->next_lun_avail_time - cmd_stime;
+        lat = lun->next_lun_avail_time - cmd_stime; // Calculates the latency
 
 #if 0
         chnl_stime = (ch->next_ch_avail_time < cmd_stime) ? cmd_stime : \
@@ -527,17 +527,17 @@ static uint64_t ssd_advance_status(struct ssd *ssd, struct ppa *ppa, struct nand
 
     case NAND_ERASE:
         /* erase: only need to advance NAND status */
-        nand_stime = (lun->next_lun_avail_time < cmd_stime) ? cmd_stime : lun->next_lun_avail_time;
-        lun->next_lun_avail_time = nand_stime + spp->blk_er_lat;
+        nand_stime = (lun->next_lun_avail_time < cmd_stime) ? cmd_stime : lun->next_lun_avail_time; // Sets the start time
+        lun->next_lun_avail_time = nand_stime + spp->blk_er_lat;                                    // Sets the next available time for the LUN
 
-        lat = lun->next_lun_avail_time - cmd_stime;
+        lat = lun->next_lun_avail_time - cmd_stime; // Calculates the latency
         break;
 
     default:
         ftl_err("Unsupported NAND command: 0x%x\n", c);
     }
 
-    return lat;
+    return lat; // Returns the latency
 }
 
 /* update SSD status about one page from PG_VALID -> PG_VALID */
@@ -645,7 +645,7 @@ static void gc_read_page(struct ssd *ssd, struct ppa *ppa)
         gcr.type = GC_IO;
         gcr.cmd = NAND_READ;
         gcr.stime = 0;
-        ssd_advance_status(ssd, ppa, &gcr);
+        ssd_advance_status(ssd, ppa, &gcr); // Advances the status of the SSD
     }
 }
 
@@ -654,27 +654,27 @@ static uint64_t gc_write_page(struct ssd *ssd, struct ppa *old_ppa)
 {
     struct ppa new_ppa;
     struct nand_lun *new_lun;
-    uint64_t lpn = get_rmap_ent(ssd, old_ppa);
+    uint64_t lpn = get_rmap_ent(ssd, old_ppa); // Returns the LPN mapped to the given PPA from the reverse mapping table
 
     ftl_assert(valid_lpn(ssd, lpn));
-    new_ppa = get_new_page(ssd);
+    new_ppa = get_new_page(ssd); // Gets a new page
     /* update maptbl */
-    set_maptbl_ent(ssd, lpn, &new_ppa);
+    set_maptbl_ent(ssd, lpn, &new_ppa); // Sets the PPA in the mapping table for the given LPN
     /* update rmap */
-    set_rmap_ent(ssd, lpn, &new_ppa);
+    set_rmap_ent(ssd, lpn, &new_ppa); // Sets the LPN for the given PPA in the reverse mapping table
 
-    mark_page_valid(ssd, &new_ppa);
+    mark_page_valid(ssd, &new_ppa); // Marks the page as valid
 
     /* need to advance the write pointer here */
     ssd_advance_write_pointer(ssd);
 
-    if (ssd->sp.enable_gc_delay) // gc 지연이 활성화되어 있으면
+    if (ssd->sp.enable_gc_delay) // If GC delay is enabled
     {
         struct nand_cmd gcw;
         gcw.type = GC_IO;
         gcw.cmd = NAND_WRITE;
         gcw.stime = 0;
-        ssd_advance_status(ssd, &new_ppa, &gcw); // 지연시간 에뮬레이션
+        ssd_advance_status(ssd, &new_ppa, &gcw); // Advances the status of the SSD
     }
 
     /* advance per-ch gc_endtime as well */
@@ -694,18 +694,18 @@ static struct line *select_victim_line(struct ssd *ssd, bool force)
     struct line_mgmt *lm = &ssd->lm;
     struct line *victim_line = NULL;
 
-    victim_line = pqueue_peek(lm->victim_line_pq);
+    victim_line = pqueue_peek(lm->victim_line_pq); // Gets the line with the lowest vpc from the priority queue
     if (!victim_line)
     {
         return NULL;
     }
 
-    if (!force && victim_line->ipc < ssd->sp.pgs_per_line / 8)
+    if (!force && victim_line->ipc < ssd->sp.pgs_per_line / 8) // If GC is not forced and the number of invalid pages in the victim line is less than 1/8 of the total pages in the line
     {
         return NULL;
     }
 
-    pqueue_pop(lm->victim_line_pq);
+    pqueue_pop(lm->victim_line_pq); // Pops the victim line from the queue
     victim_line->pos = 0;
     lm->victim_line_cnt--;
 
@@ -720,16 +720,16 @@ static void clean_one_block(struct ssd *ssd, struct ppa *ppa)
     struct nand_page *pg_iter = NULL;
     int cnt = 0;
 
-    for (int pg = 0; pg < spp->pgs_per_blk; pg++) // 블록의 페이지 개수만큼 반복
+    for (int pg = 0; pg < spp->pgs_per_blk; pg++) // Repeats for the number of pages in the block
     {
         ppa->g.pg = pg;
-        pg_iter = get_pg(ssd, ppa); // 페이지 가져오기
+        pg_iter = get_pg(ssd, ppa); // Gets the pointer to the page for the PPA
         /* there shouldn't be any free page in victim blocks */
         ftl_assert(pg_iter->status != PG_FREE);
         if (pg_iter->status == PG_VALID)
         {
-            ++pages_moved;
-            gc_read_page(ssd, ppa);
+            ++pages_moved;          // Increments the number of valid pages moved
+            gc_read_page(ssd, ppa); // Simulates the read operation
             /* delay the maptbl update until "write" happens */
             gc_write_page(ssd, ppa);
             cnt++;
@@ -758,7 +758,7 @@ static int do_gc(struct ssd *ssd, bool force)
     struct ppa ppa;
     int ch, lun;
 
-    victim_line = select_victim_line(ssd, force); // victim line 선택
+    victim_line = select_victim_line(ssd, force); // Selects the victim line
     if (!victim_line)
     {
         return -1;
@@ -770,33 +770,33 @@ static int do_gc(struct ssd *ssd, bool force)
               ssd->lm.free_line_cnt);
 
     /* copy back valid data */
-    for (ch = 0; ch < spp->nchs; ch++) // 채널 개수만큼 반복
+    for (ch = 0; ch < spp->nchs; ch++) // Repeats for the number of channels
     {
-        for (lun = 0; lun < spp->luns_per_ch; lun++) // 채널의 lun 개수만큼 반복
+        for (lun = 0; lun < spp->luns_per_ch; lun++) // Repeats for the number of luns
         {
             ppa.g.ch = ch;
             ppa.g.lun = lun;
             ppa.g.pl = 0;
-            lunp = get_lun(ssd, &ppa);  // ppa에 해당하는 lun 포인터 가져오기
-            clean_one_block(ssd, &ppa); // 블럭 하나 정리
-            ++erased_blocks;
-            mark_block_free(ssd, &ppa); // 블럭을 free로 표시
+            lunp = get_lun(ssd, &ppa);  // Returns the pointer to the LUN for the PPA
+            clean_one_block(ssd, &ppa); // Cleans the specified block
+            ++erased_blocks;            // Increments the number of erased blocks
+            mark_block_free(ssd, &ppa); // Marks the block as free
 
-            if (spp->enable_gc_delay) // gc 지연이 활성화되어 있으면
+            if (spp->enable_gc_delay) // If GC delay is enabled
             {
                 struct nand_cmd gce;
                 gce.type = GC_IO;
                 gce.cmd = NAND_ERASE;
                 gce.stime = 0;
-                ssd_advance_status(ssd, &ppa, &gce); // 지연시간 에뮬레이션
+                ssd_advance_status(ssd, &ppa, &gce); // Advances the status of the SSD
             }
 
-            lunp->gc_endtime = lunp->next_lun_avail_time;
+            lunp->gc_endtime = lunp->next_lun_avail_time; // Updates the gc_endtime of the LUN
         }
     }
 
     /* update line status */
-    mark_line_free(ssd, &ppa); // line을 free로 표시
+    mark_line_free(ssd, &ppa); // Marks the line as free
 
     return 0;
 }
@@ -807,8 +807,8 @@ static uint64_t ssd_read(struct ssd *ssd, NvmeRequest *req)
     uint64_t lba = req->slba;
     int nsecs = req->nlb;
     struct ppa ppa;
-    uint64_t start_lpn = lba / spp->secs_per_pg;             // 시작 LPN 계산
-    uint64_t end_lpn = (lba + nsecs - 1) / spp->secs_per_pg; // 마지막 LPN 계산
+    uint64_t start_lpn = lba / spp->secs_per_pg;
+    uint64_t end_lpn = (lba + nsecs - 1) / spp->secs_per_pg;
     uint64_t lpn;
     uint64_t sublat, maxlat = 0;
 
@@ -818,10 +818,10 @@ static uint64_t ssd_read(struct ssd *ssd, NvmeRequest *req)
     }
 
     /* normal IO read path */
-    for (lpn = start_lpn; lpn <= end_lpn; lpn++) // lpn 개수만큼 반복
+    for (lpn = start_lpn; lpn <= end_lpn; lpn++) // Repeats for the number of LPNs
     {
-        ppa = get_maptbl_ent(ssd, lpn);                 // 매핑 테이블에서 lpn에 매핑된 ppa를 반환
-        if (!mapped_ppa(&ppa) || !valid_ppa(ssd, &ppa)) // ppa가 매핑되어 있지 않거나 유효한 ppa가 아니면 continue
+        ppa = get_maptbl_ent(ssd, lpn);                 // Returns the PPA for the specified LPN from the mapping table
+        if (!mapped_ppa(&ppa) || !valid_ppa(ssd, &ppa)) // If the PPA is not mapped or invalid
         {
             // printf("%s,lpn(%" PRId64 ") not mapped to valid ppa\n", ssd->ssdname, lpn);
             // printf("Invalid ppa,ch:%d,lun:%d,blk:%d,pl:%d,pg:%d,sec:%d\n",
@@ -833,11 +833,11 @@ static uint64_t ssd_read(struct ssd *ssd, NvmeRequest *req)
         srd.type = USER_IO;
         srd.cmd = NAND_READ;
         srd.stime = req->stime;
-        sublat = ssd_advance_status(ssd, &ppa, &srd); // 지연시간 에뮬레이션
-        maxlat = (sublat > maxlat) ? sublat : maxlat; // 최대 레이턴시 갱신
+        sublat = ssd_advance_status(ssd, &ppa, &srd); // Calculates the latency of the NAND command
+        maxlat = (sublat > maxlat) ? sublat : maxlat; // Updates maxlat
     }
 
-    return maxlat; // 최대 레이턴시 반환
+    return maxlat; // Returns the maximum latency
 }
 
 static uint64_t ssd_write(struct ssd *ssd, NvmeRequest *req)
@@ -845,8 +845,8 @@ static uint64_t ssd_write(struct ssd *ssd, NvmeRequest *req)
     uint64_t lba = req->slba;
     struct ssdparams *spp = &ssd->sp;
     int len = req->nlb;
-    uint64_t start_lpn = lba / spp->secs_per_pg;           // 시작 LPN 계산
-    uint64_t end_lpn = (lba + len - 1) / spp->secs_per_pg; // 마지막 LPN 계산
+    uint64_t start_lpn = lba / spp->secs_per_pg;
+    uint64_t end_lpn = (lba + len - 1) / spp->secs_per_pg;
     struct ppa ppa;
     uint64_t lpn;
     uint64_t curlat = 0, maxlat = 0;
@@ -857,31 +857,31 @@ static uint64_t ssd_write(struct ssd *ssd, NvmeRequest *req)
         ftl_err("start_lpn=%" PRIu64 ",tt_pgs=%d\n", start_lpn, ssd->sp.tt_pgs);
     }
 
-    while (should_gc_high(ssd)) // GC가 필요없을 때까지 반복
+    while (should_gc_high(ssd)) // Repeats while high threshold GC is required
     {
-        r = do_gc(ssd, true); // force GC 수행
-        if (r == -1)
+        r = do_gc(ssd, true); // Performs GC
+        if (r == -1)          // If there is no victim line
             break;
     }
 
-    for (lpn = start_lpn; lpn <= end_lpn; lpn++) // lpn 개수만큼 반복
+    for (lpn = start_lpn; lpn <= end_lpn; lpn++) // Repeats for the number of LPNs
     {
-        ppa = get_maptbl_ent(ssd, lpn); // 매핑 테이블에서 lpn에 매핑된 ppa를 반환
-        if (mapped_ppa(&ppa))           // ppa가 매핑되어 있으면
+        ppa = get_maptbl_ent(ssd, lpn); // Returns the PPA for the specified LPN from the mapping table
+        if (mapped_ppa(&ppa))           // If the PPA is mapped
         {
             /* update old page information first */
-            mark_page_invalid(ssd, &ppa);         // 페이지를 invalid로 표시
-            set_rmap_ent(ssd, INVALID_LPN, &ppa); // 역매핑 테이블에서 ppa에 lpn을 INVALID_LPN으로 매핑
+            mark_page_invalid(ssd, &ppa);         // Marks the page as invalid
+            set_rmap_ent(ssd, INVALID_LPN, &ppa); // Removes the mapping of the PPA from the LPN in the reverse mapping table
         }
 
         /* new write */
-        ppa = get_new_page(ssd); // 새 페이지 가져옴
+        ppa = get_new_page(ssd); // Gets a new page
         /* update maptbl */
-        set_maptbl_ent(ssd, lpn, &ppa); // 매핑 테이블 업데이트
+        set_maptbl_ent(ssd, lpn, &ppa); // Sets the PPA in the mapping table for the given LPN
         /* update rmap */
-        set_rmap_ent(ssd, lpn, &ppa); // 역매핑 테이블 업데이트
+        set_rmap_ent(ssd, lpn, &ppa); // Sets the LPN for the given PPA in the reverse mapping table
 
-        mark_page_valid(ssd, &ppa); // 페이지를 valid로 표시
+        mark_page_valid(ssd, &ppa); // Marks the page as valid
 
         /* need to advance the write pointer here */
         ssd_advance_write_pointer(ssd); // write 포인터를 전진시킴
@@ -891,11 +891,11 @@ static uint64_t ssd_write(struct ssd *ssd, NvmeRequest *req)
         swr.cmd = NAND_WRITE;
         swr.stime = req->stime;
         /* get latency statistics */
-        curlat = ssd_advance_status(ssd, &ppa, &swr); // 지연시간 에뮬레이션
-        maxlat = (curlat > maxlat) ? curlat : maxlat; // 최대 레이턴시 갱신
+        curlat = ssd_advance_status(ssd, &ppa, &swr); // Calculates the latency of the NAND command
+        maxlat = (curlat > maxlat) ? curlat : maxlat; // Updates maxlat
     }
 
-    return maxlat;
+    return maxlat; // Returns the maximum latency
 }
 
 static void *ftl_thread(void *arg)
@@ -915,21 +915,21 @@ static void *ftl_thread(void *arg)
     ssd->to_ftl = n->to_ftl;
     ssd->to_poller = n->to_poller;
 
-    while (1) // 무한 루프
+    while (1)
     {
-        for (i = 1; i <= n->nr_pollers; i++) // 폴러 개수만큼 반복
+        for (i = 1; i <= n->nr_pollers; i++) // Repeats for the number of pollers
         {
-            if (!ssd->to_ftl[i] || !femu_ring_count(ssd->to_ftl[i])) // to_ftl 큐가 없거나 비어있으면 continue
+            if (!ssd->to_ftl[i] || !femu_ring_count(ssd->to_ftl[i])) // If the queue does not exist or is empty
                 continue;
 
-            rc = femu_ring_dequeue(ssd->to_ftl[i], (void *)&req, 1); // to_ftl 큐에서 요청을 꺼냄
+            rc = femu_ring_dequeue(ssd->to_ftl[i], (void *)&req, 1); // Dequeues a request from the queue
             if (rc != 1)
             {
                 printf("FEMU: FTL to_ftl dequeue failed\n");
             }
 
             ftl_assert(req);
-            switch (req->cmd.opcode) // opcode별로 처리
+            switch (req->cmd.opcode)
             {
             case NVME_CMD_WRITE:
                 lat = ssd_write(ssd, req); // write 요청 에뮬레이션
@@ -945,18 +945,18 @@ static void *ftl_thread(void *arg)
                 ;
             }
 
-            req->reqlat = lat;       // 지연시간 세팅
-            req->expire_time += lat; // 만료 시간 갱신
+            req->reqlat = lat;       // Sets the latency of the request
+            req->expire_time += lat; // Updates the expiration time of the request
 
-            rc = femu_ring_enqueue(ssd->to_poller[i], (void *)&req, 1); // 처리된 요청을 to_poller 큐에 넣음
+            rc = femu_ring_enqueue(ssd->to_poller[i], (void *)&req, 1); // Enqueues the request to to_poller
             if (rc != 1)
             {
                 ftl_err("FTL to_poller enqueue failed\n");
             }
 
-            if (should_gc(ssd)) // GC가 필요하면 GC 수행
+            if (should_gc(ssd)) // If GC is required
             {
-                do_gc(ssd, false);
+                do_gc(ssd, false); // Performs GC
             }
         }
     }
