@@ -2,6 +2,9 @@
 
 // #define FEMU_DEBUG_FTL
 
+extern uint64_t erased_blocks;
+extern uint64_t pages_moved;
+
 static void *ftl_thread(void *arg);
 
 static inline bool should_gc(struct ssd *ssd) // 빈 라인의 개수가 임계값보다 작은지 확인
@@ -725,6 +728,7 @@ static void clean_one_block(struct ssd *ssd, struct ppa *ppa)
         ftl_assert(pg_iter->status != PG_FREE);
         if (pg_iter->status == PG_VALID)
         {
+            ++pages_moved;
             gc_read_page(ssd, ppa);
             /* delay the maptbl update until "write" happens */
             gc_write_page(ssd, ppa);
@@ -775,6 +779,7 @@ static int do_gc(struct ssd *ssd, bool force)
             ppa.g.pl = 0;
             lunp = get_lun(ssd, &ppa);  // ppa에 해당하는 lun 포인터 가져오기
             clean_one_block(ssd, &ppa); // 블럭 하나 정리
+            ++erased_blocks;
             mark_block_free(ssd, &ppa); // 블럭을 free로 표시
 
             if (spp->enable_gc_delay) // gc 지연이 활성화되어 있으면
