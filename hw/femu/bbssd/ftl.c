@@ -9,12 +9,14 @@ static void *ftl_thread(void *arg);
 
 static inline bool should_gc(struct ssd *ssd)
 {
-    return (ssd->lm.free_line_cnt <= ssd->sp.gc_thres_lines); // Checks if the number of free lines is less than or equal to the GC threshold
+    // Checks if the number of free lines is less than or equal to the GC threshold
+    return (ssd->lm.free_line_cnt <= ssd->sp.gc_thres_lines);
 }
 
 static inline bool should_gc_high(struct ssd *ssd)
 {
-    return (ssd->lm.free_line_cnt <= ssd->sp.gc_thres_lines_high); // Checks if the number of free lines is less than or equal to the high GC threshold
+    // Checks if the number of free lines is less than or equal to the high GC threshold
+    return (ssd->lm.free_line_cnt <= ssd->sp.gc_thres_lines_high);
 }
 
 static inline struct ppa get_maptbl_ent(struct ssd *ssd, uint64_t lpn)
@@ -483,9 +485,11 @@ static uint64_t ssd_advance_status(struct ssd *ssd, struct ppa *ppa, struct nand
     {
     case NAND_READ:
         /* read: perform NAND cmd first */
-        nand_stime = (lun->next_lun_avail_time < cmd_stime) ? cmd_stime : lun->next_lun_avail_time; // Sets the start time
-        lun->next_lun_avail_time = nand_stime + spp->pg_rd_lat;                                     // Sets the next available time for the LUN
-        lat = lun->next_lun_avail_time - cmd_stime;                                                 // Calculates the latency
+        nand_stime = (lun->next_lun_avail_time < cmd_stime)
+                         ? cmd_stime
+                         : lun->next_lun_avail_time;            // Sets the start time
+        lun->next_lun_avail_time = nand_stime + spp->pg_rd_lat; // Sets the next available time for the LUN
+        lat = lun->next_lun_avail_time - cmd_stime;             // Calculates the latency
 #if 0
         lun->next_lun_avail_time = nand_stime + spp->pg_rd_lat;
 
@@ -500,7 +504,9 @@ static uint64_t ssd_advance_status(struct ssd *ssd, struct ppa *ppa, struct nand
 
     case NAND_WRITE:
         /* write: transfer data through channel first */
-        nand_stime = (lun->next_lun_avail_time < cmd_stime) ? cmd_stime : lun->next_lun_avail_time; // Sets the start time
+        nand_stime = (lun->next_lun_avail_time < cmd_stime)
+                         ? cmd_stime
+                         : lun->next_lun_avail_time; // Sets the start time
         if (ncmd->type == USER_IO)
         {
             lun->next_lun_avail_time = nand_stime + spp->pg_wr_lat; // Sets the next available time for the LUN
@@ -527,10 +533,11 @@ static uint64_t ssd_advance_status(struct ssd *ssd, struct ppa *ppa, struct nand
 
     case NAND_ERASE:
         /* erase: only need to advance NAND status */
-        nand_stime = (lun->next_lun_avail_time < cmd_stime) ? cmd_stime : lun->next_lun_avail_time; // Sets the start time
-        lun->next_lun_avail_time = nand_stime + spp->blk_er_lat;                                    // Sets the next available time for the LUN
-
-        lat = lun->next_lun_avail_time - cmd_stime; // Calculates the latency
+        nand_stime = (lun->next_lun_avail_time < cmd_stime)
+                         ? cmd_stime
+                         : lun->next_lun_avail_time;             // Sets the start time
+        lun->next_lun_avail_time = nand_stime + spp->blk_er_lat; // Sets the next available time for the LUN
+        lat = lun->next_lun_avail_time - cmd_stime;              // Calculates the latency
         break;
 
     default:
@@ -666,7 +673,7 @@ static uint64_t gc_write_page(struct ssd *ssd, struct ppa *old_ppa)
     mark_page_valid(ssd, &new_ppa); // Marks the page as valid
 
     /* need to advance the write pointer here */
-    ssd_advance_write_pointer(ssd);
+    ssd_advance_write_pointer(ssd); // Advances the write pointer
 
     if (ssd->sp.enable_gc_delay) // If GC delay is enabled
     {
@@ -700,7 +707,8 @@ static struct line *select_victim_line(struct ssd *ssd, bool force)
         return NULL;
     }
 
-    if (!force && victim_line->ipc < ssd->sp.pgs_per_line / 8) // If GC is not forced and the number of invalid pages in the victim line is less than 1/8 of the total pages in the line
+    // If GC is not forced and the number of invalid pages in the victim line is less than 1/8 of the total pages in the line
+    if (!force && victim_line->ipc < ssd->sp.pgs_per_line / 8)
     {
         return NULL;
     }
@@ -731,7 +739,7 @@ static void clean_one_block(struct ssd *ssd, struct ppa *ppa)
             ++pages_moved;          // Increments the number of valid pages moved
             gc_read_page(ssd, ppa); // Simulates the read operation
             /* delay the maptbl update until "write" happens */
-            gc_write_page(ssd, ppa);
+            gc_write_page(ssd, ppa); // Simulates the write operation
             cnt++;
         }
     }
@@ -884,7 +892,7 @@ static uint64_t ssd_write(struct ssd *ssd, NvmeRequest *req)
         mark_page_valid(ssd, &ppa); // Marks the page as valid
 
         /* need to advance the write pointer here */
-        ssd_advance_write_pointer(ssd); // write 포인터를 전진시킴
+        ssd_advance_write_pointer(ssd); // Advances the write pointer
 
         struct nand_cmd swr;
         swr.type = USER_IO;
@@ -932,10 +940,10 @@ static void *ftl_thread(void *arg)
             switch (req->cmd.opcode)
             {
             case NVME_CMD_WRITE:
-                lat = ssd_write(ssd, req); // write 요청 에뮬레이션
+                lat = ssd_write(ssd, req);
                 break;
             case NVME_CMD_READ:
-                lat = ssd_read(ssd, req); // read 요청 에뮬레이션
+                lat = ssd_read(ssd, req);
                 break;
             case NVME_CMD_DSM:
                 lat = 0;
