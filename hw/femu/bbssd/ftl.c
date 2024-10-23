@@ -9,13 +9,13 @@ static void *ftl_thread(void *arg);
 
 static inline bool should_gc(struct ssd *ssd)
 {
-    // Checks if the number of free lines is less than or equal to the GC threshold
+    // Checks if the number of free lines is less than or equal to the GC threshold(25%)
     return (ssd->lm.free_line_cnt <= ssd->sp.gc_thres_lines);
 }
 
 static inline bool should_gc_high(struct ssd *ssd)
 {
-    // Checks if the number of free lines is less than or equal to the high GC threshold
+    // Checks if the number of free lines is less than or equal to the high GC threshold(5%)
     return (ssd->lm.free_line_cnt <= ssd->sp.gc_thres_lines_high);
 }
 
@@ -652,7 +652,7 @@ static void gc_read_page(struct ssd *ssd, struct ppa *ppa)
         gcr.type = GC_IO;
         gcr.cmd = NAND_READ;
         gcr.stime = 0;
-        ssd_advance_status(ssd, ppa, &gcr); // Advances the status of the SSD
+        ssd_advance_status(ssd, ppa, &gcr); // Updates the status of the SSD
     }
 }
 
@@ -675,13 +675,13 @@ static uint64_t gc_write_page(struct ssd *ssd, struct ppa *old_ppa)
     /* need to advance the write pointer here */
     ssd_advance_write_pointer(ssd); // Advances the write pointer
 
-    if (ssd->sp.enable_gc_delay) // If GC delay is enabled
+    if (ssd->sp.enable_gc_delay) // If GC delay is enabled, which is true by default
     {
         struct nand_cmd gcw;
         gcw.type = GC_IO;
         gcw.cmd = NAND_WRITE;
         gcw.stime = 0;
-        ssd_advance_status(ssd, &new_ppa, &gcw); // Advances the status of the SSD
+        ssd_advance_status(ssd, &new_ppa, &gcw); // Updates the status of the SSD
     }
 
     /* advance per-ch gc_endtime as well */
@@ -701,7 +701,7 @@ static struct line *select_victim_line(struct ssd *ssd, bool force)
     struct line_mgmt *lm = &ssd->lm;
     struct line *victim_line = NULL;
 
-    victim_line = pqueue_peek(lm->victim_line_pq); // Gets the line with the lowest vpc from the priority queue
+    victim_line = pqueue_peek(lm->victim_line_pq); // Gets the line with the lowest valid pages count from the priority queue
     if (!victim_line)
     {
         return NULL;
@@ -728,13 +728,13 @@ static void clean_one_block(struct ssd *ssd, struct ppa *ppa)
     struct nand_page *pg_iter = NULL;
     int cnt = 0;
 
-    for (int pg = 0; pg < spp->pgs_per_blk; pg++) // Repeats for the number of pages in the block
+    for (int pg = 0; pg < spp->pgs_per_blk; pg++) // Iterates over the pages in the block
     {
         ppa->g.pg = pg;
         pg_iter = get_pg(ssd, ppa); // Gets the pointer to the page for the PPA
         /* there shouldn't be any free page in victim blocks */
         ftl_assert(pg_iter->status != PG_FREE);
-        if (pg_iter->status == PG_VALID)
+        if (pg_iter->status == PG_VALID) // If the page is valid, it needs to be moved
         {
             ++pages_moved;          // Increments the number of valid pages moved
             gc_read_page(ssd, ppa); // Simulates the read operation
@@ -772,15 +772,15 @@ static int do_gc(struct ssd *ssd, bool force)
         return -1;
     }
 
-    ppa.g.blk = victim_line->id;
+    ppa.g.blk = victim_line->id; // Sets the block index to the id of the victim line
     ftl_debug("GC-ing line:%d,ipc=%d,victim=%d,full=%d,free=%d\n", ppa.g.blk,
               victim_line->ipc, ssd->lm.victim_line_cnt, ssd->lm.full_line_cnt,
               ssd->lm.free_line_cnt);
 
     /* copy back valid data */
-    for (ch = 0; ch < spp->nchs; ch++) // Repeats for the number of channels
+    for (ch = 0; ch < spp->nchs; ch++) // Iterates over the channels
     {
-        for (lun = 0; lun < spp->luns_per_ch; lun++) // Repeats for the number of luns
+        for (lun = 0; lun < spp->luns_per_ch; lun++) // Iterates over the LUNs
         {
             ppa.g.ch = ch;
             ppa.g.lun = lun;
@@ -790,13 +790,13 @@ static int do_gc(struct ssd *ssd, bool force)
             ++erased_blocks;            // Increments the number of erased blocks
             mark_block_free(ssd, &ppa); // Marks the block as free
 
-            if (spp->enable_gc_delay) // If GC delay is enabled
+            if (spp->enable_gc_delay) // If GC delay is enabled, which is 1 by default
             {
                 struct nand_cmd gce;
                 gce.type = GC_IO;
                 gce.cmd = NAND_ERASE;
                 gce.stime = 0;
-                ssd_advance_status(ssd, &ppa, &gce); // Advances the status of the SSD
+                ssd_advance_status(ssd, &ppa, &gce); // Updates the status of the SSD
             }
 
             lunp->gc_endtime = lunp->next_lun_avail_time; // Updates the gc_endtime of the LUN
@@ -826,7 +826,7 @@ static uint64_t ssd_read(struct ssd *ssd, NvmeRequest *req)
     }
 
     /* normal IO read path */
-    for (lpn = start_lpn; lpn <= end_lpn; lpn++) // Repeats for the number of LPNs
+    for (lpn = start_lpn; lpn <= end_lpn; lpn++) // Iterates over the LPNs
     {
         ppa = get_maptbl_ent(ssd, lpn);                 // Returns the PPA for the specified LPN from the mapping table
         if (!mapped_ppa(&ppa) || !valid_ppa(ssd, &ppa)) // If the PPA is not mapped or invalid
@@ -872,7 +872,7 @@ static uint64_t ssd_write(struct ssd *ssd, NvmeRequest *req)
             break;
     }
 
-    for (lpn = start_lpn; lpn <= end_lpn; lpn++) // Repeats for the number of LPNs
+    for (lpn = start_lpn; lpn <= end_lpn; lpn++) // Iterates over the LPNs
     {
         ppa = get_maptbl_ent(ssd, lpn); // Returns the PPA for the specified LPN from the mapping table
         if (mapped_ppa(&ppa))           // If the PPA is mapped
@@ -925,7 +925,7 @@ static void *ftl_thread(void *arg)
 
     while (1)
     {
-        for (i = 1; i <= n->nr_pollers; i++) // Repeats for the number of pollers
+        for (i = 1; i <= n->nr_pollers; i++) // Iterates over the pollers
         {
             if (!ssd->to_ftl[i] || !femu_ring_count(ssd->to_ftl[i])) // If the queue does not exist or is empty
                 continue;

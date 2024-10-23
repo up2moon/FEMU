@@ -106,7 +106,7 @@ static void nvme_process_sq_io(void *opaque, int index_poller)
     nvme_update_sq_tail(sq);     // Updates the SQ tail from the doorbell register
     while (!(nvme_sq_empty(sq))) // Repeats while the SQ is not empty
     {
-        if (sq->phys_contig) // If the SQ is physically contiguous
+        if (sq->phys_contig) // If the SQ is physically contiguous, which is set to 1 by default
         {
             addr = sq->dma_addr + sq->head * n->sqe_size;                            // Gets the address of the head
             nvme_copy_cmd(&cmd, (void *)&(((NvmeCmd *)sq->dma_addr_hva)[sq->head])); // Reads a command from the SQ
@@ -203,9 +203,9 @@ static void nvme_process_cq_cpl(void *arg, int index_poller)
     int rc;
     int i;
 
-    if (BBSSD(n) || ZNSSD(n))
+    if (BBSSD(n) || ZNSSD(n)) // It is true by default
     {
-        rp = n->to_poller[index_poller]; // Executed when n->femu_mode is FEMU_BBSSD_MODE or FEMU_ZNSSD_MODE
+        rp = n->to_poller[index_poller];
     }
 
     while (femu_ring_count(rp)) // Repeats while to_poller is not empty
@@ -253,7 +253,7 @@ static void nvme_process_cq_cpl(void *arg, int index_poller)
     if (processed == 0)
         return;
 
-    switch (n->multipoller_enabled) // It is set to 0
+    switch (n->multipoller_enabled) // It is set to 0 by default
     {
     case 1:
         nvme_isr_notify_io(n->cq[index_poller]);
@@ -276,8 +276,9 @@ void *nvme_poller(void *arg)
     FemuCtrl *n = ((NvmePollerThreadArgument *)arg)->n;
     int index = ((NvmePollerThreadArgument *)arg)->index;
     int i;
+    setup_timer(); // Sets up the timer
 
-    switch (n->multipoller_enabled) // It is set to 0
+    switch (n->multipoller_enabled) // It is set to 0 by default
     {
     case 1:
         while (1)
@@ -306,7 +307,7 @@ void *nvme_poller(void *arg)
                 continue;
             }
 
-            for (i = 1; i <= n->nr_io_queues; i++) // Iterates over I/O queues
+            for (i = 1; i <= n->nr_io_queues; i++) // Iterates over the I/O queues
             {
                 NvmeSQueue *sq = n->sq[i];
                 NvmeCQueue *cq = n->cq[i];
