@@ -21,7 +21,7 @@ static void print_statistics(int signum)
     timeinfo = localtime(&now);
 
     strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", timeinfo);
-    double throughput_mb = (double)throughput / (1024 * 1024);
+    double throughput_mb = (double)throughput / (1024 * 1024); // Converts throughput to MB/s
 
     femu_log("[%s] IOPS: %lu, Throughput: %.2f MB/s\n", time_str, io_count, throughput_mb);
 
@@ -43,15 +43,15 @@ static void setup_timer(void)
     struct itimerval timer;
 
     memset(&sa, 0, sizeof(sa));
-    sa.sa_handler = &print_statistics;
+    sa.sa_handler = &print_statistics; // Sets the signal handler
     sigaction(SIGALRM, &sa, NULL);
 
-    timer.it_value.tv_sec = 1;
+    timer.it_value.tv_sec = 1; // Sets the timer to 1 second
     timer.it_value.tv_usec = 0;
-    timer.it_interval.tv_sec = 1;
+    timer.it_interval.tv_sec = 1; // Sets the interval to 1 second
     timer.it_interval.tv_usec = 0;
 
-    setitimer(ITIMER_REAL, &timer, NULL);
+    setitimer(ITIMER_REAL, &timer, NULL); // Sets the timer
 }
 
 static uint16_t nvme_io_cmd(FemuCtrl *n, NvmeCmd *cmd, NvmeRequest *req);
@@ -342,6 +342,7 @@ uint16_t nvme_rw(FemuCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd, NvmeRequest *req)
     uint16_t err;
     int ret;
 
+    ++io_count;              // Increments the I/O count
     throughput += data_size; // Accumulates throughput
 
     req->is_write = (rw->opcode == NVME_CMD_WRITE) ? 1 : 0; // Whether the request is a write

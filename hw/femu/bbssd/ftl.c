@@ -646,7 +646,7 @@ static void mark_block_free(struct ssd *ssd, struct ppa *ppa)
 static void gc_read_page(struct ssd *ssd, struct ppa *ppa)
 {
     /* advance ssd status, we don't care about how long it takes */
-    if (ssd->sp.enable_gc_delay)
+    if (ssd->sp.enable_gc_delay) // If GC delay is enabled (default is true)
     {
         struct nand_cmd gcr;
         gcr.type = GC_IO;
@@ -686,7 +686,7 @@ static uint64_t gc_write_page(struct ssd *ssd, struct ppa *old_ppa)
     }
 
     /* advance per-ch gc_endtime as well */
-#if 0
+#if 0 // This path is not taken
     new_ch = get_ch(ssd, &new_ppa);
     new_ch->gc_endtime = new_ch->next_ch_avail_time;
 #endif
