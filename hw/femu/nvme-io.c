@@ -232,7 +232,7 @@ static void nvme_process_cq_cpl(void *arg, int index_poller)
         if (!cq->is_active)
             continue;
         nvme_post_cqe(cq, req);                             // Posts a request to the CQ
-        QTAILQ_INSERT_TAIL(&req->sq->req_list, req, entry); // Inserts the request into the list
+        QTAILQ_INSERT_TAIL(&req->sq->req_list, req, entry); // Inserts the request into req_list
         pqueue_pop(pq);                                     // Pops the processed request
         processed++;
         n->nr_tt_ios++;

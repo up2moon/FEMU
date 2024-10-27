@@ -715,7 +715,7 @@ static struct line *select_victim_line(struct ssd *ssd, bool force)
     }
 
     pqueue_pop(lm->victim_line_pq); // Pops the victim line from the queue
-    victim_line->pos = 0;
+    victim_line->pos = 0;           // Resets pos of the victim line used in victim_line_pq
     lm->victim_line_cnt--;
 
     /* victim_line is a danggling node now */
