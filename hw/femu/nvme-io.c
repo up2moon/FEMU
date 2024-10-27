@@ -106,12 +106,12 @@ static void nvme_process_sq_io(void *opaque, int index_poller)
     nvme_update_sq_tail(sq);     // Updates the SQ tail from the doorbell register
     while (!(nvme_sq_empty(sq))) // Repeats while the SQ is not empty
     {
-        if (sq->phys_contig) // If the SQ is physically contiguous, which is set to 1 by default
+        if (sq->phys_contig) // If the SQ is physically contiguous (default is 1)
         {
             addr = sq->dma_addr + sq->head * n->sqe_size;                            // Gets the address of the head
             nvme_copy_cmd(&cmd, (void *)&(((NvmeCmd *)sq->dma_addr_hva)[sq->head])); // Reads a command from the SQ
         }
-        else
+        else // This path is not taken
         {
             addr = nvme_discontig(sq->prp_list, sq->head, n->page_size,
                                   n->sqe_size);                 // Gets the address of the head
@@ -128,7 +128,7 @@ static void nvme_process_sq_io(void *opaque, int index_poller)
         req->cmd_opcode = cmd.opcode;
         memcpy(&req->cmd, &cmd, sizeof(NvmeCmd));
 
-        if (n->print_log)
+        if (n->print_log) // This path is not taken
         {
             femu_debug("%s,cid:%d\n", __func__, cmd.cid);
         }
@@ -144,7 +144,7 @@ static void nvme_process_sq_io(void *opaque, int index_poller)
                 femu_err("enqueue failed, ret=%d\n", rc);
             }
         }
-        else if (status == NVME_SUCCESS)
+        else if (status == NVME_SUCCESS) // This path is not taken
         {
             /* Normal I/Os that don't need delay emulation */
             req->status = status;
@@ -169,7 +169,7 @@ static void nvme_post_cqe(NvmeCQueue *cq, NvmeRequest *req)
     uint8_t phase = cq->phase;
     hwaddr addr;
 
-    if (n->print_log)
+    if (n->print_log) // This path is not taken
     {
         femu_debug("%s,req,lba:%lu,lat:%lu\n", n->devname, req->slba, req->reqlat);
     }
@@ -177,12 +177,12 @@ static void nvme_post_cqe(NvmeCQueue *cq, NvmeRequest *req)
     cqe->sq_id = cpu_to_le16(sq->sqid);
     cqe->sq_head = cpu_to_le16(sq->head);
 
-    if (cq->phys_contig)
+    if (cq->phys_contig) // If the CQ is physically contiguous (default is 1)
     {
         addr = cq->dma_addr + cq->tail * n->cqe_size;
         ((NvmeCqe *)cq->dma_addr_hva)[cq->tail] = *cqe;
     }
-    else
+    else // This path is not taken
     {
         addr = nvme_discontig(cq->prp_list, cq->tail, n->page_size, n->cqe_size);
         nvme_addr_write(n, addr, (void *)cqe, sizeof(*cqe));
@@ -203,7 +203,7 @@ static void nvme_process_cq_cpl(void *arg, int index_poller)
     int rc;
     int i;
 
-    if (BBSSD(n) || ZNSSD(n)) // It is true by default
+    if (BBSSD(n) || ZNSSD(n)) // Default is true
     {
         rp = n->to_poller[index_poller];
     }
@@ -218,7 +218,7 @@ static void nvme_process_cq_cpl(void *arg, int index_poller)
         }
         assert(req);
 
-        pqueue_insert(pq, req); // Inserts the request into the priority queue in order of the decreasing expiration time
+        pqueue_insert(pq, req); // Inserts the request into the priority queue, with priority determined by expiration time
     }
     while ((req = pqueue_peek(pq))) // Repeats while the priority queue is not empty
     {
@@ -231,7 +231,7 @@ static void nvme_process_cq_cpl(void *arg, int index_poller)
         cq = n->cq[req->sq->sqid];
         if (!cq->is_active)
             continue;
-        nvme_post_cqe(cq, req);                             // Posts a CQ entry to the CQ
+        nvme_post_cqe(cq, req);                             // Posts a request to the CQ
         QTAILQ_INSERT_TAIL(&req->sq->req_list, req, entry); // Inserts the request into the list
         pqueue_pop(pq);                                     // Pops the processed request
         processed++;
@@ -240,7 +240,7 @@ static void nvme_process_cq_cpl(void *arg, int index_poller)
         if (now - req->expire_time >= 20000) // If the request is delayed by more than 20us
         {
             n->nr_tt_late_ios++;
-            if (n->print_log)
+            if (n->print_log) // This path is not taken
             {
                 femu_debug("%s,diff,pq.count=%lu,%" PRId64 ", %lu/%lu\n",
                            n->devname, pqueue_size(pq), now - req->expire_time,
@@ -253,13 +253,13 @@ static void nvme_process_cq_cpl(void *arg, int index_poller)
     if (processed == 0)
         return;
 
-    switch (n->multipoller_enabled) // It is set to 0 by default
+    switch (n->multipoller_enabled) // Default is 0
     {
-    case 1:
+    case 1: // This path is not taken
         nvme_isr_notify_io(n->cq[index_poller]);
         break;
-    default: // multipoller disabled
-        for (i = 1; i <= n->nr_io_queues; i++)
+    default:                                   // multipoller disabled
+        for (i = 1; i <= n->nr_io_queues; i++) // Iterates over the I/O queues
         {
             if (n->should_isr[i])
             {
@@ -278,9 +278,9 @@ void *nvme_poller(void *arg)
     int i;
     setup_timer(); // Sets up the timer
 
-    switch (n->multipoller_enabled) // It is set to 0 by default
+    switch (n->multipoller_enabled) // Default is 0
     {
-    case 1:
+    case 1: // This path is not taken
         while (1)
         {
             if ((!n->dataplane_started))
@@ -342,29 +342,29 @@ uint16_t nvme_rw(FemuCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd, NvmeRequest *req)
     uint16_t err;
     int ret;
 
-    throughput += data_size;
+    throughput += data_size; // Accumulates throughput
 
-    req->is_write = (rw->opcode == NVME_CMD_WRITE) ? 1 : 0;
+    req->is_write = (rw->opcode == NVME_CMD_WRITE) ? 1 : 0; // Whether the request is a write
 
     err = femu_nvme_rw_check_req(n, ns, cmd, req, slba, elba, nlb, ctrl,
-                                 data_size, meta_size);
+                                 data_size, meta_size); // Validates the request
     if (err)
         return err;
 
-    if (nvme_map_prp(&req->qsg, &req->iov, prp1, prp2, data_size, n))
+    if (nvme_map_prp(&req->qsg, &req->iov, prp1, prp2, data_size, n)) // Maps the PRP to the request
     {
         nvme_set_error_page(n, req->sq->sqid, cmd->cid, NVME_INVALID_FIELD,
-                            offsetof(NvmeRwCmd, prp1), 0, ns->id);
+                            offsetof(NvmeRwCmd, prp1), 0, ns->id); // Sets an error page
         return NVME_INVALID_FIELD | NVME_DNR;
     }
 
-    assert((nlb << data_shift) == req->qsg.size);
+    assert((nlb << data_shift) == req->qsg.size); // Asserts that the size of the request is correct
 
     req->slba = slba;
     req->status = NVME_SUCCESS;
     req->nlb = nlb;
 
-    ret = backend_rw(n->mbe, &req->qsg, &data_offset, req->is_write);
+    ret = backend_rw(n->mbe, &req->qsg, &data_offset, req->is_write); // Reads/writes data to/from DRAM
     if (!ret)
     {
         return NVME_SUCCESS;

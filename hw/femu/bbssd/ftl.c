@@ -9,25 +9,25 @@ static void *ftl_thread(void *arg);
 
 static inline bool should_gc(struct ssd *ssd)
 {
-    // Checks if the number of free lines is less than or equal to the GC threshold(25%)
+    // Checks if the free line count is less than or equal to the GC threshold(default is 25%)
     return (ssd->lm.free_line_cnt <= ssd->sp.gc_thres_lines);
 }
 
 static inline bool should_gc_high(struct ssd *ssd)
 {
-    // Checks if the number of free lines is less than or equal to the high GC threshold(5%)
+    // Checks if the free line count is less than or equal to the high GC threshold(default is 5%)
     return (ssd->lm.free_line_cnt <= ssd->sp.gc_thres_lines_high);
 }
 
 static inline struct ppa get_maptbl_ent(struct ssd *ssd, uint64_t lpn)
 {
-    return ssd->maptbl[lpn]; // Returns the PPA for the specified LPN from the mapping table
+    return ssd->maptbl[lpn];
 }
 
 static inline void set_maptbl_ent(struct ssd *ssd, uint64_t lpn, struct ppa *ppa)
 {
     ftl_assert(lpn < ssd->sp.tt_pgs);
-    ssd->maptbl[lpn] = *ppa; // Sets the PPA in the mapping table for the given LPN
+    ssd->maptbl[lpn] = *ppa;
 }
 
 static uint64_t ppa2pgidx(struct ssd *ssd, struct ppa *ppa)
@@ -169,41 +169,41 @@ static void ssd_advance_write_pointer(struct ssd *ssd)
 
     check_addr(wpp->ch, spp->nchs); // Checks if the channel index is within the valid range
     wpp->ch++;                      // Increments the channel index
-    if (wpp->ch == spp->nchs)       // If the channel index is equal to the number of channels
+    if (wpp->ch == spp->nchs)       // If the channel index is out of range
     {
         wpp->ch = 0;                            // Resets the channel index
         check_addr(wpp->lun, spp->luns_per_ch); // Checks if the LUN index is within the valid range
         wpp->lun++;                             // Increments the LUN index
         /* in this case, we should go to next lun */
-        if (wpp->lun == spp->luns_per_ch) // If the LUN index is equal to the number of LUNs per channel
+        if (wpp->lun == spp->luns_per_ch) // If the LUN index is out of range
         {
             wpp->lun = 0; // Resets the LUN index
             /* go to next page in the block */
             check_addr(wpp->pg, spp->pgs_per_blk); // Checks if the page index is within the valid range
             wpp->pg++;                             // Increments the page index
-            if (wpp->pg == spp->pgs_per_blk)       // If the page index is equal to the number of pages per block
+            if (wpp->pg == spp->pgs_per_blk)       // If the page index is out of range
             {
                 wpp->pg = 0; // Resets the page index
                 /* move current line to {victim,full} line list */
-                if (wpp->curline->vpc == spp->pgs_per_line) // If the number of valid pages in the current line is equal to the number of pages per line
+                if (wpp->curline->vpc == spp->pgs_per_line) // If all pages in the current line are valid
                 {
                     /* all pgs are still valid, move to full line list */
                     ftl_assert(wpp->curline->ipc == 0);
-                    QTAILQ_INSERT_TAIL(&lm->full_line_list, wpp->curline, entry); // Inserts the current line to the tail of the full line list
-                    lm->full_line_cnt++;                                          // Increments the number of full lines
+                    QTAILQ_INSERT_TAIL(&lm->full_line_list, wpp->curline, entry); // Inserts the current line at the tail of full_line_list
+                    lm->full_line_cnt++;                                          // Increments the full line count
                 }
                 else
                 {
                     ftl_assert(wpp->curline->vpc >= 0 && wpp->curline->vpc < spp->pgs_per_line);
                     /* there must be some invalid pages in this line */
                     ftl_assert(wpp->curline->ipc > 0);
-                    pqueue_insert(lm->victim_line_pq, wpp->curline); // Inserts the current line to the priority queue
-                    lm->victim_line_cnt++;                           // Increments the number of victim lines
+                    pqueue_insert(lm->victim_line_pq, wpp->curline); // Inserts the current line into victim_line_pq
+                    lm->victim_line_cnt++;                           // Increments the victim line count
                 }
                 /* current line is used up, pick another empty line */
                 check_addr(wpp->blk, spp->blks_per_pl); // Checks if the block index is within the valid range
                 wpp->curline = NULL;
-                wpp->curline = get_next_free_line(ssd); // Gets the next free line
+                wpp->curline = get_next_free_line(ssd); // Sets the current line to the next free line
                 if (!wpp->curline)
                 {
                     /* TODO */
@@ -490,7 +490,7 @@ static uint64_t ssd_advance_status(struct ssd *ssd, struct ppa *ppa, struct nand
                          : lun->next_lun_avail_time;            // Sets the start time
         lun->next_lun_avail_time = nand_stime + spp->pg_rd_lat; // Sets the next available time for the LUN
         lat = lun->next_lun_avail_time - cmd_stime;             // Calculates the latency
-#if 0
+#if 0                                                           // This path is not taken
         lun->next_lun_avail_time = nand_stime + spp->pg_rd_lat;
 
         /* read: then data transfer through channel */
@@ -661,21 +661,22 @@ static uint64_t gc_write_page(struct ssd *ssd, struct ppa *old_ppa)
 {
     struct ppa new_ppa;
     struct nand_lun *new_lun;
-    uint64_t lpn = get_rmap_ent(ssd, old_ppa); // Returns the LPN mapped to the given PPA from the reverse mapping table
+
+    uint64_t lpn = get_rmap_ent(ssd, old_ppa); // Gets the LPN using the PPA from the reverse mapping table
 
     ftl_assert(valid_lpn(ssd, lpn));
     new_ppa = get_new_page(ssd); // Gets a new page
     /* update maptbl */
-    set_maptbl_ent(ssd, lpn, &new_ppa); // Sets the PPA in the mapping table for the given LPN
+    set_maptbl_ent(ssd, lpn, &new_ppa); // Sets LPN->PPA mapping in the mapping table
     /* update rmap */
-    set_rmap_ent(ssd, lpn, &new_ppa); // Sets the LPN for the given PPA in the reverse mapping table
+    set_rmap_ent(ssd, lpn, &new_ppa); // Sets PPA->LPN mapping in the reverse mapping table
 
     mark_page_valid(ssd, &new_ppa); // Marks the page as valid
 
     /* need to advance the write pointer here */
     ssd_advance_write_pointer(ssd); // Advances the write pointer
 
-    if (ssd->sp.enable_gc_delay) // If GC delay is enabled, which is true by default
+    if (ssd->sp.enable_gc_delay) // If GC delay is enabled (default is true)
     {
         struct nand_cmd gcw;
         gcw.type = GC_IO;
@@ -690,8 +691,8 @@ static uint64_t gc_write_page(struct ssd *ssd, struct ppa *old_ppa)
     new_ch->gc_endtime = new_ch->next_ch_avail_time;
 #endif
 
-    new_lun = get_lun(ssd, &new_ppa);
-    new_lun->gc_endtime = new_lun->next_lun_avail_time;
+    new_lun = get_lun(ssd, &new_ppa);                   // Returns the pointer to the LUN
+    new_lun->gc_endtime = new_lun->next_lun_avail_time; // Updates gc_endtime of the LUN
 
     return 0;
 }
@@ -701,13 +702,13 @@ static struct line *select_victim_line(struct ssd *ssd, bool force)
     struct line_mgmt *lm = &ssd->lm;
     struct line *victim_line = NULL;
 
-    victim_line = pqueue_peek(lm->victim_line_pq); // Gets the line with the lowest valid pages count from the priority queue
+    victim_line = pqueue_peek(lm->victim_line_pq); // Gets the line with the lowest valid page count from the priority queue
     if (!victim_line)
     {
         return NULL;
     }
 
-    // If GC is not forced and the number of invalid pages in the victim line is less than 1/8 of the total pages in the line
+    // If GC is not forced and the invalid page count in the victim line is less than 1/8 of the total pages in the line
     if (!force && victim_line->ipc < ssd->sp.pgs_per_line / 8)
     {
         return NULL;
@@ -731,12 +732,12 @@ static void clean_one_block(struct ssd *ssd, struct ppa *ppa)
     for (int pg = 0; pg < spp->pgs_per_blk; pg++) // Iterates over the pages in the block
     {
         ppa->g.pg = pg;
-        pg_iter = get_pg(ssd, ppa); // Gets the pointer to the page for the PPA
+        pg_iter = get_pg(ssd, ppa); // Gets the pointer to the page
         /* there shouldn't be any free page in victim blocks */
-        ftl_assert(pg_iter->status != PG_FREE);
-        if (pg_iter->status == PG_VALID) // If the page is valid, it needs to be moved
+        ftl_assert(pg_iter->status != PG_FREE); // Asserts that the page is either valid or invalid
+        if (pg_iter->status == PG_VALID)        // If the page is valid, it needs to be moved
         {
-            ++pages_moved;          // Increments the number of valid pages moved
+            ++pages_moved;          // Increments the valid page count moved
             gc_read_page(ssd, ppa); // Simulates the read operation
             /* delay the maptbl update until "write" happens */
             gc_write_page(ssd, ppa); // Simulates the write operation
@@ -782,15 +783,16 @@ static int do_gc(struct ssd *ssd, bool force)
     {
         for (lun = 0; lun < spp->luns_per_ch; lun++) // Iterates over the LUNs
         {
+            // Sets the channel, LUN, and plane indices
             ppa.g.ch = ch;
             ppa.g.lun = lun;
             ppa.g.pl = 0;
-            lunp = get_lun(ssd, &ppa);  // Returns the pointer to the LUN for the PPA
+            lunp = get_lun(ssd, &ppa);  // Returns the pointer to the LUN
             clean_one_block(ssd, &ppa); // Cleans the specified block
-            ++erased_blocks;            // Increments the number of erased blocks
+            ++erased_blocks;            // Increments the erased block count
             mark_block_free(ssd, &ppa); // Marks the block as free
 
-            if (spp->enable_gc_delay) // If GC delay is enabled, which is 1 by default
+            if (spp->enable_gc_delay) // If GC delay is enabled (default is true)
             {
                 struct nand_cmd gce;
                 gce.type = GC_IO;
@@ -799,7 +801,7 @@ static int do_gc(struct ssd *ssd, bool force)
                 ssd_advance_status(ssd, &ppa, &gce); // Updates the status of the SSD
             }
 
-            lunp->gc_endtime = lunp->next_lun_avail_time; // Updates the gc_endtime of the LUN
+            lunp->gc_endtime = lunp->next_lun_avail_time; // Updates gc_endtime of the LUN
         }
     }
 
@@ -828,7 +830,7 @@ static uint64_t ssd_read(struct ssd *ssd, NvmeRequest *req)
     /* normal IO read path */
     for (lpn = start_lpn; lpn <= end_lpn; lpn++) // Iterates over the LPNs
     {
-        ppa = get_maptbl_ent(ssd, lpn);                 // Returns the PPA for the specified LPN from the mapping table
+        ppa = get_maptbl_ent(ssd, lpn);                 // Gets the PPA using the LPN from the mapping table
         if (!mapped_ppa(&ppa) || !valid_ppa(ssd, &ppa)) // If the PPA is not mapped or invalid
         {
             // printf("%s,lpn(%" PRId64 ") not mapped to valid ppa\n", ssd->ssdname, lpn);
@@ -874,7 +876,7 @@ static uint64_t ssd_write(struct ssd *ssd, NvmeRequest *req)
 
     for (lpn = start_lpn; lpn <= end_lpn; lpn++) // Iterates over the LPNs
     {
-        ppa = get_maptbl_ent(ssd, lpn); // Returns the PPA for the specified LPN from the mapping table
+        ppa = get_maptbl_ent(ssd, lpn); // Gets the PPA using the LPN from the mapping table
         if (mapped_ppa(&ppa))           // If the PPA is mapped
         {
             /* update old page information first */
@@ -885,9 +887,9 @@ static uint64_t ssd_write(struct ssd *ssd, NvmeRequest *req)
         /* new write */
         ppa = get_new_page(ssd); // Gets a new page
         /* update maptbl */
-        set_maptbl_ent(ssd, lpn, &ppa); // Sets the PPA in the mapping table for the given LPN
+        set_maptbl_ent(ssd, lpn, &ppa); // Sets LPN->PPA mapping in the mapping table
         /* update rmap */
-        set_rmap_ent(ssd, lpn, &ppa); // Sets the LPN for the given PPA in the reverse mapping table
+        set_rmap_ent(ssd, lpn, &ppa); // Sets PPA->LPN mapping in the reverse mapping table
 
         mark_page_valid(ssd, &ppa); // Marks the page as valid
 
@@ -925,7 +927,7 @@ static void *ftl_thread(void *arg)
 
     while (1)
     {
-        for (i = 1; i <= n->nr_pollers; i++) // Iterates over the pollers
+        for (i = 1; i <= n->nr_pollers; i++) // Iterates over the pollers (default nr_pollers is 1)
         {
             if (!ssd->to_ftl[i] || !femu_ring_count(ssd->to_ftl[i])) // If the queue does not exist or is empty
                 continue;
@@ -940,10 +942,10 @@ static void *ftl_thread(void *arg)
             switch (req->cmd.opcode)
             {
             case NVME_CMD_WRITE:
-                lat = ssd_write(ssd, req);
+                lat = ssd_write(ssd, req); // Simulates the write operation
                 break;
             case NVME_CMD_READ:
-                lat = ssd_read(ssd, req);
+                lat = ssd_read(ssd, req); // Simulates the read operation
                 break;
             case NVME_CMD_DSM:
                 lat = 0;
