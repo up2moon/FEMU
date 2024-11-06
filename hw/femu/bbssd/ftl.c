@@ -7,6 +7,11 @@ extern uint64_t pages_moved;
 
 static void *ftl_thread(void *arg);
 
+static inline bool is_hot_data(int write_count)
+{
+    return write_count > HOT_DATA_THRESHOLD;
+}
+
 static inline bool should_gc(struct ssd *ssd)
 {
     // Checks if the free line count is less than or equal to the GC threshold(default is 25%)
@@ -120,9 +125,17 @@ static void ssd_init_lines(struct ssd *ssd)
     lm->full_line_cnt = 0;
 }
 
+#ifdef HOT_COLD_DATA_SEPARATION
+static void ssd_init_write_pointer(struct ssd *ssd, bool is_hot)
+#else
 static void ssd_init_write_pointer(struct ssd *ssd)
+#endif
 {
+#ifdef HOT_COLD_DATA_SEPARATION
+    struct write_pointer *wpp = is_hot ? &ssd->hot_wp : &ssd->cold_wp;
+#else
     struct write_pointer *wpp = &ssd->wp;
+#endif
     struct line_mgmt *lm = &ssd->lm;
     struct line *curline = NULL;
 
@@ -161,10 +174,19 @@ static struct line *get_next_free_line(struct ssd *ssd)
     return curline;
 }
 
+#ifdef HOT_COLD_DATA_SEPARATION
+static void ssd_advance_write_pointer(struct ssd *ssd, bool is_hot)
+#else
 static void ssd_advance_write_pointer(struct ssd *ssd)
+#endif
 {
     struct ssdparams *spp = &ssd->sp;
+#ifdef HOT_COLD_DATA_SEPARATION
+    struct write_pointer *wpp = is_hot ? &ssd->hot_wp : &ssd->cold_wp;
+#else
     struct write_pointer *wpp = &ssd->wp;
+#endif
+
     struct line_mgmt *lm = &ssd->lm;
 
     check_addr(wpp->ch, spp->nchs); // Checks if the channel index is within the valid range
@@ -222,9 +244,17 @@ static void ssd_advance_write_pointer(struct ssd *ssd)
     }
 }
 
+#ifdef HOT_COLD_DATA_SEPARATION
+static struct ppa get_new_page(struct ssd *ssd, bool is_hot)
+#else
 static struct ppa get_new_page(struct ssd *ssd)
+#endif
 {
+#ifdef HOT_COLD_DATA_SEPARATION
+    struct write_pointer *wpp = is_hot ? &ssd->hot_wp : &ssd->cold_wp;
+#else
     struct write_pointer *wpp = &ssd->wp;
+#endif
     struct ppa ppa;
     ppa.ppa = 0;
     ppa.g.ch = wpp->ch;
@@ -406,7 +436,14 @@ void ssd_init(FemuCtrl *n)
     ssd_init_lines(ssd);
 
     /* initialize write pointer, this is how we allocate new pages for writes */
-    ssd_init_write_pointer(ssd);
+#ifdef HOT_COLD_DATA_SEPARATION
+    ssd_init_write_pointer(ssd, true);  // Initializes the write pointer for hot data
+    ssd_init_write_pointer(ssd, false); // Initializes the write pointer for cold data
+#else
+    ssd_init_write_pointer(ssd); // Initializes the write pointer
+#endif
+
+    ssd->page_write_counts = g_malloc0(sizeof(uint64_t) * spp->tt_pgs);
 
     qemu_thread_create(&ssd->ftl_thread, "FEMU-FTL-Thread", ftl_thread, n,
                        QEMU_THREAD_JOINABLE); // Creates ftl_thread
@@ -665,7 +702,15 @@ static uint64_t gc_write_page(struct ssd *ssd, struct ppa *old_ppa)
     uint64_t lpn = get_rmap_ent(ssd, old_ppa); // Gets the LPN using the PPA from the reverse mapping table
 
     ftl_assert(valid_lpn(ssd, lpn));
+
+    uint64_t write_count = ssd->page_write_counts[lpn]; // Gets the write count for the LPN
+    bool is_hot = is_hot_data(write_count);             // Checks if the data is hot or cold
+
+#ifdef HOT_COLD_DATA_SEPARATION
+    new_ppa = get_new_page(ssd, is_hot); // Gets a new page
+#else
     new_ppa = get_new_page(ssd); // Gets a new page
+#endif
     /* update maptbl */
     set_maptbl_ent(ssd, lpn, &new_ppa); // Sets LPN->PPA mapping in the mapping table
     /* update rmap */
@@ -674,7 +719,11 @@ static uint64_t gc_write_page(struct ssd *ssd, struct ppa *old_ppa)
     mark_page_valid(ssd, &new_ppa); // Marks the page as valid
 
     /* need to advance the write pointer here */
+#ifdef HOT_COLD_DATA_SEPARATION
+    ssd_advance_write_pointer(ssd, is_hot); // Advances the write pointer
+#else
     ssd_advance_write_pointer(ssd); // Advances the write pointer
+#endif
 
     if (ssd->sp.enable_gc_delay) // If GC delay is enabled (default is true)
     {
@@ -883,9 +932,17 @@ static uint64_t ssd_write(struct ssd *ssd, NvmeRequest *req)
             mark_page_invalid(ssd, &ppa);         // Marks the page as invalid
             set_rmap_ent(ssd, INVALID_LPN, &ppa); // Removes the mapping of the PPA from the LPN in the reverse mapping table
         }
+        ++ssd->page_write_counts[lpn]; // Increments the write count of the page
+
+        uint64_t write_count = ssd->page_write_counts[lpn]; // Gets the write count for the LPN
+        bool is_hot = is_hot_data(write_count);             // Checks if the data is hot or cold
 
         /* new write */
+#ifdef HOT_COLD_DATA_SEPARATION
+        ppa = get_new_page(ssd, is_hot); // Gets a new page
+#else
         ppa = get_new_page(ssd); // Gets a new page
+#endif
         /* update maptbl */
         set_maptbl_ent(ssd, lpn, &ppa); // Sets LPN->PPA mapping in the mapping table
         /* update rmap */
@@ -894,7 +951,11 @@ static uint64_t ssd_write(struct ssd *ssd, NvmeRequest *req)
         mark_page_valid(ssd, &ppa); // Marks the page as valid
 
         /* need to advance the write pointer here */
+#ifdef HOT_COLD_DATA_SEPARATION
+        ssd_advance_write_pointer(ssd, is_hot); // Advances the write pointer
+#else
         ssd_advance_write_pointer(ssd); // Advances the write pointer
+#endif
 
         struct nand_cmd swr;
         swr.type = USER_IO;
