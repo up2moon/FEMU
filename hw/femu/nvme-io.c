@@ -1,58 +1,6 @@
 #include "./nvme.h"
 
-static uint64_t io_count = 0;
-static uint64_t throughput = 0;
-uint64_t pages_moved = 0;
-uint64_t erased_blocks = 0;
-
-static void print_statistics(int signum);
-static void setup_timer(void);
-
-static void print_statistics(int signum)
-{
-    static int seconds_counter = 0;
-    if (io_count == 0)
-        return;
-    time_t now;
-    struct tm *timeinfo;
-    char time_str[20];
-
-    time(&now);
-    timeinfo = localtime(&now);
-
-    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", timeinfo);
-    double throughput_mb = (double)throughput / (1024 * 1024); // Converts throughput to MB/s
-
-    femu_log("[%s] IOPS: %lu, Throughput: %.2f MB/s\n", time_str, io_count, throughput_mb);
-
-    if (++seconds_counter >= 10)
-    {
-        femu_log("[%s] Erased blocks: %lu, # of valid pages moved: %lu\n", time_str, erased_blocks, pages_moved);
-        erased_blocks = 0;
-        seconds_counter = 0;
-        pages_moved = 0;
-    }
-
-    io_count = 0;
-    throughput = 0;
-}
-
-static void setup_timer(void)
-{
-    struct sigaction sa;
-    struct itimerval timer;
-
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_handler = &print_statistics; // Sets the signal handler
-    sigaction(SIGALRM, &sa, NULL);
-
-    timer.it_value.tv_sec = 1; // Sets the timer to 1 second
-    timer.it_value.tv_usec = 0;
-    timer.it_interval.tv_sec = 1; // Sets the interval to 1 second
-    timer.it_interval.tv_usec = 0;
-
-    setitimer(ITIMER_REAL, &timer, NULL); // Sets the timer
-}
+extern uint64_t io_count;
 
 static uint16_t nvme_io_cmd(FemuCtrl *n, NvmeCmd *cmd, NvmeRequest *req);
 
@@ -276,7 +224,6 @@ void *nvme_poller(void *arg)
     FemuCtrl *n = ((NvmePollerThreadArgument *)arg)->n;
     int index = ((NvmePollerThreadArgument *)arg)->index;
     int i;
-    setup_timer(); // Sets up the timer
 
     switch (n->multipoller_enabled) // Default is 0
     {
@@ -342,8 +289,7 @@ uint16_t nvme_rw(FemuCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd, NvmeRequest *req)
     uint16_t err;
     int ret;
 
-    ++io_count;              // Increments the I/O count
-    throughput += data_size; // Accumulates throughput
+    ++io_count; // Increments the I/O count
 
     req->is_write = (rw->opcode == NVME_CMD_WRITE) ? 1 : 0; // Whether the request is a write
 

@@ -2,14 +2,80 @@
 
 // #define FEMU_DEBUG_FTL
 
-extern uint64_t erased_blocks;
-extern uint64_t pages_moved;
+uint64_t io_count = 0;
+static uint64_t pages_moved;
+static uint64_t pages_written_by_host;
 
 static void *ftl_thread(void *arg);
 
-static inline bool is_hot_data(int write_count)
+static void print_statistics(int signum);
+static void setup_timer(void);
+static void handle_signal(int sig);
+static void setup_signal_handler(void);
+
+static void handle_signal(int sig)
 {
-    return write_count > HOT_DATA_THRESHOLD;
+    if (sig == SIGUSR2)
+    {
+        ftl_log("Benchmark completed. Printing stats...\n");
+    }
+}
+
+static void setup_signal_handler(void)
+{
+    struct sigaction sa;
+
+    sa.sa_handler = handle_signal;
+    sa.sa_flags = 0;
+    sigemptyset(&sa.sa_mask);
+
+    if (sigaction(SIGUSR2, &sa, NULL) == -1)
+    {
+        ftl_err("sigaction failed");
+        return;
+    }
+}
+
+static void print_statistics(int signum)
+{
+    if (io_count == 0)
+        return;
+    time_t now;
+    struct tm *timeinfo;
+    char time_str[20];
+
+    time(&now);
+    timeinfo = localtime(&now);
+
+    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", timeinfo);
+
+    double waf = pages_written_by_host == 0 ? 0 : (double)(pages_written_by_host + pages_moved) / pages_written_by_host;
+    femu_log("[%s] IOPS: %lu, WAF: %.2f\n", time_str, io_count, waf);
+    pages_moved = 0;
+    pages_written_by_host = 0;
+    io_count = 0;
+}
+
+static void setup_timer(void)
+{
+    struct sigaction sa;
+    struct itimerval timer;
+
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = &print_statistics; // Sets the signal handler
+    sigaction(SIGALRM, &sa, NULL);
+
+    timer.it_value.tv_sec = 1; // Sets the timer to 1 second
+    timer.it_value.tv_usec = 0;
+    timer.it_interval.tv_sec = 10; // Sets the interval to 10 second
+    timer.it_interval.tv_usec = 0;
+
+    setitimer(ITIMER_REAL, &timer, NULL); // Sets the timer
+}
+
+static inline bool is_hot_data(struct ssd *ssd, uint64_t lpn)
+{
+    return ssd->page_write_counts[lpn] > HOT_DATA_THRESHOLD;
 }
 
 static inline bool should_gc(struct ssd *ssd)
@@ -148,7 +214,7 @@ static void ssd_init_write_pointer(struct ssd *ssd)
     wpp->ch = 0;
     wpp->lun = 0;
     wpp->pg = 0;
-    wpp->blk = 0;
+    wpp->blk = curline->id; // Sets the block index to the ID of the current line
     wpp->pl = 0;
 }
 
@@ -445,6 +511,10 @@ void ssd_init(FemuCtrl *n)
 
     ssd->page_write_counts = g_malloc0(sizeof(uint64_t) * spp->tt_pgs);
 
+    setup_timer(); // Sets up the timer
+
+    setup_signal_handler(); // Sets up the signal handler
+
     qemu_thread_create(&ssd->ftl_thread, "FEMU-FTL-Thread", ftl_thread, n,
                        QEMU_THREAD_JOINABLE); // Creates ftl_thread
 }
@@ -703,10 +773,10 @@ static uint64_t gc_write_page(struct ssd *ssd, struct ppa *old_ppa)
 
     ftl_assert(valid_lpn(ssd, lpn));
 
-    uint64_t write_count = ssd->page_write_counts[lpn]; // Gets the write count for the LPN
-    bool is_hot = is_hot_data(write_count);             // Checks if the data is hot or cold
+    ++ssd->page_write_counts[lpn]; // Increments the write count of the page
 
 #ifdef HOT_COLD_DATA_SEPARATION
+    bool is_hot = is_hot_data(ssd, lpn); // Checks if the data is hot or cold
     new_ppa = get_new_page(ssd, is_hot); // Gets a new page
 #else
     new_ppa = get_new_page(ssd); // Gets a new page
@@ -838,7 +908,6 @@ static int do_gc(struct ssd *ssd, bool force)
             ppa.g.pl = 0;
             lunp = get_lun(ssd, &ppa);  // Returns the pointer to the LUN
             clean_one_block(ssd, &ppa); // Cleans the specified block
-            ++erased_blocks;            // Increments the erased block count
             mark_block_free(ssd, &ppa); // Marks the block as free
 
             if (spp->enable_gc_delay) // If GC delay is enabled (default is true)
@@ -933,13 +1002,12 @@ static uint64_t ssd_write(struct ssd *ssd, NvmeRequest *req)
             set_rmap_ent(ssd, INVALID_LPN, &ppa); // Removes the mapping of the PPA from the LPN in the reverse mapping table
         }
         ++ssd->page_write_counts[lpn]; // Increments the write count of the page
-
-        uint64_t write_count = ssd->page_write_counts[lpn]; // Gets the write count for the LPN
-        bool is_hot = is_hot_data(write_count);             // Checks if the data is hot or cold
+        ++pages_written_by_host;
 
         /* new write */
 #ifdef HOT_COLD_DATA_SEPARATION
-        ppa = get_new_page(ssd, is_hot); // Gets a new page
+        bool is_hot = is_hot_data(ssd, lpn); // Checks if the data is hot or cold
+        ppa = get_new_page(ssd, is_hot);     // Gets a new page
 #else
         ppa = get_new_page(ssd); // Gets a new page
 #endif
