@@ -2,10 +2,193 @@
 
 // #define FEMU_DEBUG_FTL
 
-extern uint64_t erased_blocks;
-extern uint64_t pages_moved;
+uint64_t io_count = 0;
+static uint64_t pages_moved;
+static uint64_t pages_written_by_host;
+static struct ssd *g_ssd = NULL;
+static pthread_t tid;
+static uint64_t hot_data_threshold = 10000000; // All data is cold by default
 
 static void *ftl_thread(void *arg);
+
+static void print_statistics(int signum);
+static void setup_timer(void);
+static int compare(const void *a, const void *b);
+static void trim_newline(char *str);
+
+static int compare(const void *a, const void *b)
+{
+    uint64_t num1 = *(uint64_t *)a;
+    uint64_t num2 = *(uint64_t *)b;
+
+    return num1 - num2;
+}
+
+static void trim_newline(char *str)
+{
+    size_t len = strlen(str);
+    while (len > 0 && (str[len - 1] == '\n' || str[len - 1] == '\r' || isspace(str[len - 1])))
+    {
+        str[len - 1] = '\0';
+        --len;
+    }
+}
+
+static void *fifo_handler(void *arg)
+{
+    const char *fifo_name = "femu_fifo";
+    char buffer[256];
+
+    if (mkfifo(fifo_name, 0666) == -1 && errno != EEXIST) // Creates a FIFO
+    {
+        ftl_log("mkfifo failed\n");
+        pthread_exit(NULL);
+    }
+    if (chmod(fifo_name, 0666) == -1) // Changes the permissions of the FIFO
+    {
+        ftl_log("chmod failed\n");
+        pthread_exit(NULL);
+    }
+    int fd = open(fifo_name, O_RDONLY | O_NONBLOCK); // Opens the FIFO
+    if (fd == -1)
+    {
+        ftl_log("Failed to open fifo\n");
+        pthread_exit(NULL);
+    }
+    ftl_log("Clearing existing FIFO contents...\n");
+
+    int bytes = read(fd, buffer, sizeof(buffer) - 1);
+    if (bytes > 0)
+    {
+        do // Reads and discards the contents of the FIFO
+        {
+            buffer[bytes] = '\0';
+            printf("Discarded: %s\n", buffer);
+            bytes = read(fd, buffer, sizeof(buffer) - 1);
+        } while (bytes > 0);
+    }
+    else if (bytes == -1 && errno != EAGAIN)
+    {
+        ftl_log("Error reading from FIFO\n");
+        close(fd);
+        pthread_exit(NULL);
+    }
+    close(fd);
+
+    fd = open(fifo_name, O_RDONLY); // Opens the FIFO
+    if (fd == -1)
+    {
+        ftl_log("Failed to open fifo\n");
+        pthread_exit(NULL);
+    }
+
+    while (true)
+    {
+        bytes = read(fd, buffer, sizeof(buffer) - 1);
+        if (bytes > 0)
+        {
+            buffer[bytes] = '\0';
+            trim_newline(buffer); // Trims the newline character
+
+            char *cmd = strtok(buffer, " ");
+            if (cmd == NULL)
+                continue;
+
+            if (!strcmp(cmd, "clear"))
+            {
+                if (g_ssd != NULL)
+                {
+                    for (int i = 0; i < g_ssd->sp.tt_pgs; ++i)
+                        g_ssd->page_write_counts[i] = 0;
+                    ftl_log("Cleared page_write_counts\n");
+                }
+            }
+            else if (!strcmp(cmd, "save"))
+            {
+                FILE *file = fopen("result.txt", "w");
+                if (file == NULL)
+                {
+                    ftl_log("Failed to open result.txt\n");
+                    pthread_exit(NULL);
+                }
+
+                fprintf(file, "hot data threshold: %lu\n", hot_data_threshold);
+
+                qsort(g_ssd->page_write_counts, g_ssd->sp.tt_pgs, sizeof(uint64_t), compare); // Sorts the page write counts
+
+                for (int i = 0; i < g_ssd->sp.tt_pgs; ++i)
+                {
+                    if (g_ssd->page_write_counts[i] != 0)
+                    {
+                        fprintf(file, "%lu,\n", g_ssd->page_write_counts[i]);
+                    }
+                }
+                ftl_log("Stats saved\n");
+                fclose(file);
+            }
+            else if (!strcmp(cmd, "threshold"))
+            {
+                char *value_str = strtok(NULL, " ");
+                if (value_str != NULL)
+                {
+                    hot_data_threshold = (uint64_t)atoi(value_str); // Sets the hot data threshold
+                    ftl_log("Set hot data threshold to %lu\n", hot_data_threshold);
+                }
+                else
+                {
+                    ftl_log("Error: Missing threshold value\n");
+                }
+            }
+            else
+                ftl_log("Unknown FIFO command: %s\n", cmd);
+            fflush(stdout);
+        }
+    }
+    close(fd);
+    pthread_exit(NULL);
+}
+
+static void print_statistics(int signum)
+{
+    if (io_count == 0)
+        return;
+    time_t now;
+    struct tm *timeinfo;
+    char time_str[20];
+
+    time(&now);
+    timeinfo = localtime(&now);
+
+    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", timeinfo);
+
+    double waf = pages_written_by_host == 0 ? 0 : (double)(pages_written_by_host + pages_moved) / pages_written_by_host;
+    femu_log("[%s] IOPS: %lu, WAF: %.2f\n", time_str, io_count, waf);
+    pages_moved = 0;
+    pages_written_by_host = 0;
+    io_count = 0;
+}
+
+static void setup_timer(void)
+{
+    struct sigaction sa;
+    struct itimerval timer;
+
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = &print_statistics; // Sets the signal handler
+    sigaction(SIGALRM, &sa, NULL);
+
+    timer.it_value.tv_sec = 1; // Sets the timer to 1 second
+    timer.it_value.tv_usec = 0;
+    timer.it_interval.tv_sec = 10; // Sets the interval to 10 second
+    timer.it_interval.tv_usec = 0;
+
+    setitimer(ITIMER_REAL, &timer, NULL); // Sets the timer
+}
+
+static inline bool is_hot_data(struct ssd *ssd, uint64_t lpn)
+{
+    return ssd->page_write_counts[lpn] > hot_data_threshold;
+}
 
 static inline bool should_gc(struct ssd *ssd)
 {
@@ -120,9 +303,17 @@ static void ssd_init_lines(struct ssd *ssd)
     lm->full_line_cnt = 0;
 }
 
+#ifdef HOT_COLD_DATA_SEPARATION
+static void ssd_init_write_pointer(struct ssd *ssd, bool is_hot)
+#else
 static void ssd_init_write_pointer(struct ssd *ssd)
+#endif
 {
+#ifdef HOT_COLD_DATA_SEPARATION
+    struct write_pointer *wpp = is_hot ? &ssd->hot_wp : &ssd->cold_wp;
+#else
     struct write_pointer *wpp = &ssd->wp;
+#endif
     struct line_mgmt *lm = &ssd->lm;
     struct line *curline = NULL;
 
@@ -131,11 +322,12 @@ static void ssd_init_write_pointer(struct ssd *ssd)
     lm->free_line_cnt--;
 
     /* wpp->curline is always our next-to-write super-block */
+
     wpp->curline = curline;
     wpp->ch = 0;
     wpp->lun = 0;
     wpp->pg = 0;
-    wpp->blk = 0;
+    wpp->blk = curline->id;
     wpp->pl = 0;
 }
 
@@ -161,10 +353,19 @@ static struct line *get_next_free_line(struct ssd *ssd)
     return curline;
 }
 
+#ifdef HOT_COLD_DATA_SEPARATION
+static void ssd_advance_write_pointer(struct ssd *ssd, bool is_hot)
+#else
 static void ssd_advance_write_pointer(struct ssd *ssd)
+#endif
 {
     struct ssdparams *spp = &ssd->sp;
+#ifdef HOT_COLD_DATA_SEPARATION
+    struct write_pointer *wpp = is_hot ? &ssd->hot_wp : &ssd->cold_wp;
+#else
     struct write_pointer *wpp = &ssd->wp;
+#endif
+
     struct line_mgmt *lm = &ssd->lm;
 
     check_addr(wpp->ch, spp->nchs); // Checks if the channel index is within the valid range
@@ -222,9 +423,17 @@ static void ssd_advance_write_pointer(struct ssd *ssd)
     }
 }
 
+#ifdef HOT_COLD_DATA_SEPARATION
+static struct ppa get_new_page(struct ssd *ssd, bool is_hot)
+#else
 static struct ppa get_new_page(struct ssd *ssd)
+#endif
 {
+#ifdef HOT_COLD_DATA_SEPARATION
+    struct write_pointer *wpp = is_hot ? &ssd->hot_wp : &ssd->cold_wp;
+#else
     struct write_pointer *wpp = &ssd->wp;
+#endif
     struct ppa ppa;
     ppa.ppa = 0;
     ppa.g.ch = wpp->ch;
@@ -406,7 +615,24 @@ void ssd_init(FemuCtrl *n)
     ssd_init_lines(ssd);
 
     /* initialize write pointer, this is how we allocate new pages for writes */
-    ssd_init_write_pointer(ssd);
+#ifdef HOT_COLD_DATA_SEPARATION
+    ssd_init_write_pointer(ssd, true);  // Initializes the write pointer for hot data
+    ssd_init_write_pointer(ssd, false); // Initializes the write pointer for cold data
+#else
+    ssd_init_write_pointer(ssd); // Initializes the write pointer
+#endif
+
+    ssd->page_write_counts = g_malloc0(sizeof(uint64_t) * spp->tt_pgs);
+
+    setup_timer(); // Sets up the timer
+
+    g_ssd = ssd;
+
+    if (pthread_create(&tid, NULL, fifo_handler, NULL) != 0) // Creates a FIFO handler thread
+    {
+        ftl_log("Failed to create thread\n");
+        exit(1);
+    }
 
     qemu_thread_create(&ssd->ftl_thread, "FEMU-FTL-Thread", ftl_thread, n,
                        QEMU_THREAD_JOINABLE); // Creates ftl_thread
@@ -665,7 +891,13 @@ static uint64_t gc_write_page(struct ssd *ssd, struct ppa *old_ppa)
     uint64_t lpn = get_rmap_ent(ssd, old_ppa); // Gets the LPN using the PPA from the reverse mapping table
 
     ftl_assert(valid_lpn(ssd, lpn));
+
+#ifdef HOT_COLD_DATA_SEPARATION
+    bool is_hot = is_hot_data(ssd, lpn); // Checks if the data is hot or cold
+    new_ppa = get_new_page(ssd, is_hot); // Gets a new page
+#else
     new_ppa = get_new_page(ssd); // Gets a new page
+#endif
     /* update maptbl */
     set_maptbl_ent(ssd, lpn, &new_ppa); // Sets LPN->PPA mapping in the mapping table
     /* update rmap */
@@ -674,7 +906,11 @@ static uint64_t gc_write_page(struct ssd *ssd, struct ppa *old_ppa)
     mark_page_valid(ssd, &new_ppa); // Marks the page as valid
 
     /* need to advance the write pointer here */
+#ifdef HOT_COLD_DATA_SEPARATION
+    ssd_advance_write_pointer(ssd, is_hot); // Advances the write pointer
+#else
     ssd_advance_write_pointer(ssd); // Advances the write pointer
+#endif
 
     if (ssd->sp.enable_gc_delay) // If GC delay is enabled (default is true)
     {
@@ -789,7 +1025,6 @@ static int do_gc(struct ssd *ssd, bool force)
             ppa.g.pl = 0;
             lunp = get_lun(ssd, &ppa);  // Returns the pointer to the LUN
             clean_one_block(ssd, &ppa); // Cleans the specified block
-            ++erased_blocks;            // Increments the erased block count
             mark_block_free(ssd, &ppa); // Marks the block as free
 
             if (spp->enable_gc_delay) // If GC delay is enabled (default is true)
@@ -883,9 +1118,16 @@ static uint64_t ssd_write(struct ssd *ssd, NvmeRequest *req)
             mark_page_invalid(ssd, &ppa);         // Marks the page as invalid
             set_rmap_ent(ssd, INVALID_LPN, &ppa); // Removes the mapping of the PPA from the LPN in the reverse mapping table
         }
+        ++ssd->page_write_counts[lpn]; // Increments the write count of the page
+        ++pages_written_by_host;
 
         /* new write */
+#ifdef HOT_COLD_DATA_SEPARATION
+        bool is_hot = is_hot_data(ssd, lpn); // Checks if the data is hot or cold
+        ppa = get_new_page(ssd, is_hot);     // Gets a new page
+#else
         ppa = get_new_page(ssd); // Gets a new page
+#endif
         /* update maptbl */
         set_maptbl_ent(ssd, lpn, &ppa); // Sets LPN->PPA mapping in the mapping table
         /* update rmap */
@@ -894,7 +1136,11 @@ static uint64_t ssd_write(struct ssd *ssd, NvmeRequest *req)
         mark_page_valid(ssd, &ppa); // Marks the page as valid
 
         /* need to advance the write pointer here */
+#ifdef HOT_COLD_DATA_SEPARATION
+        ssd_advance_write_pointer(ssd, is_hot); // Advances the write pointer
+#else
         ssd_advance_write_pointer(ssd); // Advances the write pointer
+#endif
 
         struct nand_cmd swr;
         swr.type = USER_IO;
