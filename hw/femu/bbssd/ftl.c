@@ -84,13 +84,13 @@ static void *fifo_handler(void *arg)
 
     while (true)
     {
-        bytes = read(fd, buffer, sizeof(buffer) - 1);
+        bytes = read(fd, buffer, sizeof(buffer) - 1); // Reads from the FIFO
         if (bytes > 0)
         {
             buffer[bytes] = '\0';
             trim_newline(buffer); // Trims the newline character
 
-            char *cmd = strtok(buffer, " ");
+            char *cmd = strtok(buffer, " "); // Tokenizes the buffer by whitespace
             if (cmd == NULL)
                 continue;
 
@@ -99,7 +99,7 @@ static void *fifo_handler(void *arg)
                 if (g_ssd != NULL)
                 {
                     for (int i = 0; i < g_ssd->sp.tt_pgs; ++i)
-                        g_ssd->page_write_counts[i] = 0;
+                        g_ssd->page_write_counts[i] = 0; // Clears the page write counts
                     ftl_log("Cleared page_write_counts\n");
                 }
             }
@@ -120,7 +120,7 @@ static void *fifo_handler(void *arg)
                 {
                     if (g_ssd->page_write_counts[i] != 0)
                     {
-                        fprintf(file, "%lu,\n", g_ssd->page_write_counts[i]);
+                        fprintf(file, "%lu,\n", g_ssd->page_write_counts[i]); // Writes the page write counts to the file
                     }
                 }
                 ftl_log("Stats saved\n");
@@ -162,7 +162,7 @@ static void print_statistics(int signum)
     strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", timeinfo);
 
     double waf = pages_written_by_host == 0 ? 0 : (double)(pages_written_by_host + pages_moved) / pages_written_by_host;
-    femu_log("[%s] IOPS: %lu, WAF: %.2f\n", time_str, io_count, waf);
+    femu_log("[%s] IOPS: %lu, WAF: %.2f\n", time_str, io_count, waf); // Prints the IOPS and WAF
     pages_moved = 0;
     pages_written_by_host = 0;
     io_count = 0;
@@ -327,7 +327,7 @@ static void ssd_init_write_pointer(struct ssd *ssd)
     wpp->ch = 0;
     wpp->lun = 0;
     wpp->pg = 0;
-    wpp->blk = curline->id;
+    wpp->blk = curline->id; // Sets the block index to the ID of the current line
     wpp->pl = 0;
 }
 
@@ -622,7 +622,7 @@ void ssd_init(FemuCtrl *n)
     ssd_init_write_pointer(ssd); // Initializes the write pointer
 #endif
 
-    ssd->page_write_counts = g_malloc0(sizeof(uint64_t) * spp->tt_pgs);
+    ssd->page_write_counts = g_malloc0(sizeof(uint64_t) * spp->tt_pgs); // Allocates memory for the page write counts
 
     setup_timer(); // Sets up the timer
 
@@ -1119,7 +1119,7 @@ static uint64_t ssd_write(struct ssd *ssd, NvmeRequest *req)
             set_rmap_ent(ssd, INVALID_LPN, &ppa); // Removes the mapping of the PPA from the LPN in the reverse mapping table
         }
         ++ssd->page_write_counts[lpn]; // Increments the write count of the page
-        ++pages_written_by_host;
+        ++pages_written_by_host;       // Increments the total write count
 
         /* new write */
 #ifdef HOT_COLD_DATA_SEPARATION
