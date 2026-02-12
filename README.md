@@ -13,10 +13,6 @@
 
 ```
 
-## Report on FEMU
-
-For an in-depth analysis and performance evaluation, refer to the [Report: Internal Mechanisms and Performance Evaluation of FEMU SSD Emulator](FEMU_SSD_Emulator_Internal_Mechanisms_Performance_Evaluation.pdf).
-
 ## Contact Information
 
 **Maintainer**: [Huaicheng Li](https://huaicheng.github.io), Email: `huaicheng@cs.vt.edu`
